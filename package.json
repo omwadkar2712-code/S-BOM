@@ -1,0 +1,7 @@
+{
+  "name": "sbom",
+  "private": true,
+  "scripts": {
+    "dev:all": "node scripts/dev-all.mjs"
+  }
+}

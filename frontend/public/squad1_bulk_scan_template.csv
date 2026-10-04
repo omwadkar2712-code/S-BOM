@@ -1,0 +1,9 @@
+project_name,application_name,version,repository_url,branch,authentication_reference,scan_type
+Express,express,4.21.2,https://github.com/expressjs/express,master,,GITHUB
+Flask,flask,3.1.0,https://github.com/pallets/flask,main,,GITHUB
+Gson,gson,2.11.0,https://github.com/google/gson,main,,GITHUB
+Gin,gin,1.10.0,https://github.com/gin-gonic/gin,master,,GITHUB
+Serde,serde,1.0.217,https://github.com/serde-rs/serde,master,,GITHUB
+Newtonsoft.Json,newtonsoft.json,13.0.3,https://github.com/JamesNK/Newtonsoft.Json,master,,GITHUB
+Guzzle,guzzle,7.9.2,https://github.com/guzzle/guzzle,8.2,,GITHUB
+Nokogiri,nokogiri,1.18.2,https://github.com/sparklemotion/nokogiri,main,,GITHUB

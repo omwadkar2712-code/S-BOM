@@ -1,0 +1,16 @@
+# Local data (object storage, uploads)
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment / secrets
+.env
+.venv/
+secrets/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

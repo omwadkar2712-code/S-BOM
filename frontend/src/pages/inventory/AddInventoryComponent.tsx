@@ -144,7 +144,7 @@ export const AddInventoryComponent: React.FC = () => {
 
   return (
     <div className="w-full max-w-7xl mx-auto animate-fadeIn pb-6">
-      {/* Top Header Bar with Upload File button */}
+      {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2.5">
           <button
@@ -291,7 +291,7 @@ export const AddInventoryComponent: React.FC = () => {
             </div>
           </div>
 
-          {/* Section 2: Package & Security Information (Vulnerabilities removed) */}
+          {/* Section 2: Package & Security Information */}
           <div className="space-y-2.5 pt-2">
             <div className="flex items-center gap-2 pb-1.5 border-b border-gray-100 dark:border-gray-800">
               <div className="w-5 h-5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200/60 dark:border-emerald-800/60">
@@ -385,7 +385,7 @@ export const AddInventoryComponent: React.FC = () => {
                 />
               </div>
 
-              {/* Created By */}
+              {/* Created By (Styled the same way as Package URL) */}
               <div>
                 <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight mb-1">
                   Created By

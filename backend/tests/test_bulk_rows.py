@@ -1,6 +1,6 @@
 """Bulk scan row rules: duplicate projects are skipped, invalid rows do not stop the file."""
 
-from app.sources import parse_bulk
+from app.sources.workspace import parse_bulk
 
 HEADER = "project_name,application_name,version,repository_url,branch,authentication_reference,scan_type\n"
 

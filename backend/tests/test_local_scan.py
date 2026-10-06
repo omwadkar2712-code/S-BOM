@@ -161,7 +161,7 @@ def test_rescan_completed_and_failed(tmp_path):
 
 
 def test_cancel_queued_and_running_scan(tmp_path):
-    from app.orchestrator import ScanCancelled
+    from app.scans.orchestrator import ScanCancelled
 
     _fresh(tmp_path / "objects")
     app = build()

@@ -24,16 +24,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   const res = await fetch(`${BASE}${path}`, { ...init, headers });
   const text = await res.text();
-  let body: Envelope<T> | null = null;
+  let body: (Envelope<T> & { detail?: string }) | null = null;
   if (text) {
     try {
-      body = JSON.parse(text) as Envelope<T>;
+      body = JSON.parse(text) as Envelope<T> & { detail?: string };
     } catch {
       throw new ApiError('INVALID_RESPONSE', 'The scan API returned a non-JSON response.');
     }
   }
   if (!res.ok || body?.success === false) {
-    throw new ApiError(body?.error?.code || 'REQUEST_FAILED', body?.error?.message || res.statusText);
+    const message = body?.error?.message || body?.detail || res.statusText || 'Request failed';
+    throw new ApiError(body?.error?.code || 'REQUEST_FAILED', message);
   }
   return body?.data as T;
 }
@@ -47,14 +48,13 @@ export interface ApiScan {
   status: string;
   stage: string;
   created_at: string;
+  started_at?: string;
   completed_at?: string;
   snapshot_id?: string;
   error_code?: string;
   error_message?: string;
   bulk_scan_id?: string;
   bulk_row?: number;
-  started_at?: string;
-  completed_at?: string;
   file_name?: string;
   repository_url?: string;
   branch?: string;
@@ -109,6 +109,45 @@ export function healthReady(): Promise<{ status: string }> {
 
 export async function listScans(): Promise<ApiScan[]> {
   return (await request<ApiScan[] | null>('/api/v1/scans')) || [];
+}
+
+export interface ApiProjectSummary {
+  project_count: number;
+  active_projects: number;
+  avg_compliance_pct: number;
+  compliant_count: number;
+  total_count: number;
+  total_scans: number;
+  sbom_files: number;
+}
+
+export interface ApiProjectRow {
+  id: string;
+  name: string;
+  classifier: string;
+  risk: 'Healthy' | 'Needs Attention' | 'High Risk';
+  compliance: string;
+  compliance_pct: number;
+  vulns: number;
+  scans: number;
+  tags: string[];
+  last_scanned_at: string;
+  latest_scan_id?: string;
+  latest_snapshot_id?: string;
+  source_types?: string[];
+}
+
+export interface ApiProjectsDashboard {
+  summary: ApiProjectSummary;
+  projects: ApiProjectRow[];
+}
+
+export function listProjects(params?: { q?: string; status?: string }): Promise<ApiProjectsDashboard> {
+  const query = new URLSearchParams();
+  if (params?.q) query.set('q', params.q);
+  if (params?.status && params.status !== 'All Statuses') query.set('status', params.status);
+  const suffix = query.toString() ? `?${query}` : '';
+  return request(`/api/v1/projects${suffix}`);
 }
 
 export function scanStatus(id: string): Promise<ApiScanStatus> {

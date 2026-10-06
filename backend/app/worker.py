@@ -7,10 +7,11 @@ import signal
 import threading
 import time
 
-from .api import build
-from .config import load
-from .metrics import METRICS
-from .orchestrator import RetryableError, ScanCancelled, next_attempt
+from app.api import build
+from app.core.config import load
+from app.core.db import ensure_alive
+from app.core.metrics import METRICS
+from app.scans import RetryableError, ScanCancelled, next_attempt
 
 
 def main() -> None:
@@ -19,6 +20,7 @@ def main() -> None:
     orch = app.state.orch
     queue = orch.queue
     cfg = app.state.cfg
+    db = app.state.db
     stop = threading.Event()
 
     def handle_stop(*_args):
@@ -30,9 +32,14 @@ def main() -> None:
     def loop(worker_id: int) -> None:
         while not stop.is_set():
             try:
+                if not ensure_alive(db):
+                    logging.error("database unavailable; worker %s backing off", worker_id)
+                    stop.wait(max(cfg.queue_poll_ms / 1000, 1.0))
+                    continue
                 job = queue.claim(cfg.scan_timeout_seconds)
             except Exception:
                 logging.exception("queue claim failed")
+                ensure_alive(db)
                 stop.wait(cfg.queue_poll_ms / 1000)
                 continue
             if job is None:

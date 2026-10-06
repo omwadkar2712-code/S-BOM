@@ -68,6 +68,8 @@ export interface SBOMComponent {
   projectApplication?: string;
   packageName?: string;
   fieldType?: ComponentFieldType;
+  fileName?: string;
+  createdBy?: string;
   compliance: number; // 0 - 100%
   license: LicenseType;
   trustScore: number; // 0-100

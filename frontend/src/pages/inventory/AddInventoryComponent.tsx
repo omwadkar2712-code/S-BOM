@@ -5,28 +5,33 @@ import {
   Layers,
   Shield,
   CheckCircle2,
+  Upload,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAppState } from '../../context/AppStateContext';
-import { ComponentFieldType, LicenseType, Severity, Ecosystem } from '../../types';
+import { LicenseType, Severity, Ecosystem } from '../../types';
+import { UploadInventoryModal } from './UploadInventoryModal';
 
 export const AddInventoryComponent: React.FC = () => {
   const navigate = useNavigate();
   const { addToast, projects, addComponent } = useAppState();
 
-  // Form State: Empty inputs by default as requested
+  // Form State
   const [projectName, setProjectName] = useState('');
   const [projectApplication, setProjectApplication] = useState('');
   const [componentName, setComponentName] = useState('');
   const [packageName, setPackageName] = useState('');
   const [version, setVersion] = useState('');
-  const [fieldType, setFieldType] = useState<ComponentFieldType>('Library');
+  const [fileName, setFileName] = useState('package.json');
   const [ecosystem, setEcosystem] = useState<Ecosystem>('npm');
   const [license, setLicense] = useState<LicenseType>('MIT');
-  const [vulnerabilities, setVulnerabilities] = useState<string>('');
   const [purl, setPurl] = useState('');
   const [purlManuallyEdited, setPurlManuallyEdited] = useState(false);
   const [riskLevel, setRiskLevel] = useState<Severity | 'Safe'>('Safe');
-  const [directDependency, setDirectDependency] = useState(true);
+  const [createdBy, setCreatedBy] = useState('SecOps Admin');
+
+  // Modal State for Upload File
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   // Auto-generate canonical Package URL (P-URL) live when not manually overridden
   useEffect(() => {
@@ -54,6 +59,8 @@ export const AddInventoryComponent: React.FC = () => {
     const trimmedComp = componentName.trim();
     const trimmedPkg = packageName.trim() || trimmedComp;
     const trimmedVer = version.trim();
+    const trimmedFile = fileName.trim() || 'package.json';
+    const trimmedCreatedBy = createdBy.trim() || 'SecOps Admin';
 
     if (!trimmedProject) {
       addToast({
@@ -95,9 +102,6 @@ export const AddInventoryComponent: React.FC = () => {
       purl.trim() ||
       `pkg:${ecosystem.toLowerCase()}/${trimmedPkg}@${trimmedVer}`;
 
-    const numVulns = parseInt(vulnerabilities, 10);
-    const parsedVulns = isNaN(numVulns) || numVulns < 0 ? 0 : numVulns;
-
     setSaving(true);
     try {
       await addComponent({
@@ -106,16 +110,18 @@ export const AddInventoryComponent: React.FC = () => {
         version: trimmedVer,
         project: trimmedProject,
         projectApplication: trimmedApp,
-        fieldType,
+        fileName: trimmedFile,
+        fieldType: 'Library',
         ecosystem,
         license,
         supplier: 'Registered Software Component',
-        directDependency,
+        directDependency: true,
         compliance: 95.0,
         trustScore: 90,
         risk: riskLevel,
-        cves: parsedVulns,
+        cves: 0,
         purl: finalPurl,
+        createdBy: trimmedCreatedBy,
       });
     } catch (error) {
       addToast({
@@ -138,7 +144,41 @@ export const AddInventoryComponent: React.FC = () => {
 
   return (
     <div className="w-full max-w-7xl mx-auto animate-fadeIn pb-6">
-      {/* Single Unified Full Form Card with Compact Enterprise Layout */}
+      {/* Top Header Bar with Upload File button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => navigate('/software-inventory')}
+            className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition-colors cursor-pointer"
+            title="Back to Software Inventory"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div>
+            <h1 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <Package className="w-4 h-4 text-blue-600" />
+              <span>Add Inventory Component</span>
+            </h1>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Register a software component manually or bulk import via Excel file
+            </p>
+          </div>
+        </div>
+
+        {/* Upload File Button */}
+        <button
+          type="button"
+          onClick={() => setUploadModalOpen(true)}
+          className="px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-lg shadow-sm shadow-emerald-500/20 flex items-center gap-2 cursor-pointer transition-all shrink-0 self-start sm:self-auto hover:scale-[1.01]"
+          title="Upload Excel or CSV file"
+        >
+          <Upload className="w-3.5 h-3.5" />
+          <span>Upload File</span>
+        </button>
+      </div>
+
+      {/* Single Unified Full Form Card */}
       <div className="bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-xl p-4 sm:p-5 shadow-xs">
         <form id="add-inventory-form" onSubmit={handleSubmit} className="space-y-4">
           {/* Section 1: Basic Information */}
@@ -245,30 +285,24 @@ export const AddInventoryComponent: React.FC = () => {
                 />
               </div>
 
-              {/* Field Type */}
+              {/* File Name (Changed from Field Type) */}
               <div>
                 <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight mb-1">
-                  Field Type <span className="text-red-500">*</span>
+                  File Name <span className="text-red-500">*</span>
                 </label>
-                <select
-                  value={fieldType}
-                  onChange={(e) => setFieldType(e.target.value as ComponentFieldType)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-gray-850 transition-colors shadow-2xs cursor-pointer"
-                >
-                  <option value="Library">Library (Open-source package / SDK)</option>
-                  <option value="Application">Application (Standalone program / service)</option>
-                  <option value="Framework">Framework (Structural architecture / engine)</option>
-                  <option value="Container">Container (Base container image / OCI)</option>
-                  <option value="Service">Service (Cloud microservice / SaaS API)</option>
-                  <option value="Operating System">Operating System (OS kernel / distro package)</option>
-                  <option value="Device / Firmware">Device / Firmware (Hardware driver / embedded)</option>
-                  <option value="File">File (Script / binary asset)</option>
-                </select>
+                <input
+                  type="text"
+                  required
+                  value={fileName}
+                  onChange={(e) => setFileName(e.target.value)}
+                  placeholder="e.g. package.json, pom.xml, app.js"
+                  className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-gray-850 transition-colors shadow-2xs"
+                />
               </div>
             </div>
           </div>
 
-          {/* Section 2: Package & Security Information */}
+          {/* Section 2: Package & Security Information (Vulnerabilities removed) */}
           <div className="space-y-2.5 pt-2">
             <div className="flex items-center gap-2 pb-1.5 border-b border-gray-100 dark:border-gray-800">
               <div className="w-5 h-5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200/60 dark:border-emerald-800/60">
@@ -279,7 +313,8 @@ export const AddInventoryComponent: React.FC = () => {
               </h2>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 pt-0.5">
+            {/* Row 1: License, Ecosystem, Risk Level */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 pt-0.5">
               {/* License */}
               <div>
                 <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight mb-1">
@@ -300,21 +335,6 @@ export const AddInventoryComponent: React.FC = () => {
                   <option value="Commercial">Commercial / Proprietary</option>
                   <option value="Unknown">Unknown</option>
                 </select>
-              </div>
-
-              {/* Vulnerabilities (CVEs) */}
-              <div>
-                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight mb-1">
-                  Vulnerabilities (CVEs)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={vulnerabilities}
-                  onChange={(e) => setVulnerabilities(e.target.value)}
-                  placeholder="0"
-                  className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-gray-850 transition-colors shadow-2xs"
-                />
               </div>
 
               {/* Ecosystem */}
@@ -355,15 +375,15 @@ export const AddInventoryComponent: React.FC = () => {
                   <option value="Critical">Critical</option>
                 </select>
               </div>
+            </div>
 
+            {/* Row 2: Package URL (small) & Created By side-by-side */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3 pt-1">
               {/* P-URL (Package URL) */}
-              <div className="sm:col-span-2 lg:col-span-4">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight">
-                    P-URL (Package URL)
-                  </label>
-
-                </div>
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight mb-1">
+                  P-URL (Package URL)
+                </label>
                 <input
                   type="text"
                   value={purl}
@@ -375,35 +395,20 @@ export const AddInventoryComponent: React.FC = () => {
                   className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-gray-850 transition-colors shadow-2xs"
                 />
               </div>
-            </div>
-          </div>
 
-          {/* Section 3: Dependency Configuration */}
-          <div className="space-y-2 pt-2">
-            <div className="flex items-center gap-2 pb-1.5 border-b border-gray-100 dark:border-gray-800">
-              <div className="w-5 h-5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200/60 dark:border-indigo-800/60">
-                <Package className="w-3 h-3" />
-              </div>
-              <h2 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
-                Dependency Configuration
-              </h2>
-            </div>
-
-            <div className="p-2.5 bg-gray-50/60 dark:bg-gray-800/40 border border-gray-200/70 dark:border-gray-700/70 rounded-lg">
-              <label className="flex items-center gap-2.5 cursor-pointer">
+              {/* Created By (Styled the same way as Package URL) */}
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight mb-1">
+                  Created By
+                </label>
                 <input
-                  type="checkbox"
-                  checked={directDependency}
-                  onChange={(e) => setDirectDependency(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-gray-300 dark:border-gray-600 cursor-pointer"
+                  type="text"
+                  value={createdBy}
+                  onChange={(e) => setCreatedBy(e.target.value)}
+                  placeholder="e.g. SecOps Admin, Jane Doe"
+                  className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-gray-850 transition-colors shadow-2xs"
                 />
-                <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">
-                  Direct root package dependency
-                </span>
-                <span className="text-[11px] text-gray-400 dark:text-gray-500 hidden sm:inline">
-                  (Declared in root manifest, e.g. package.json / pom.xml; uncheck if transitive)
-                </span>
-              </label>
+              </div>
             </div>
           </div>
 
@@ -427,6 +432,13 @@ export const AddInventoryComponent: React.FC = () => {
           </div>
         </form>
       </div>
+
+      {/* Upload File Pop-up Modal */}
+      <UploadInventoryModal
+        isOpen={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        onSuccess={() => navigate('/software-inventory')}
+      />
     </div>
   );
 };

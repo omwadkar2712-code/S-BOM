@@ -156,43 +156,10 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
         setVulns(api.mapVulns(matches, comps || [], job.targetProject).slice(0, 8));
       } catch {
         if (!cancelled) {
-          const fallbackComps: PreviewComponent[] = [
-            { id: 'c1', name: 'react', version: '18.3.1', ecosystem: 'npm', direct: true },
-            { id: 'c2', name: 'express', version: '4.19.2', ecosystem: 'npm', direct: true },
-            { id: 'c3', name: 'lodash', version: '4.17.21', ecosystem: 'npm', direct: false },
-            { id: 'c4', name: 'axios', version: '1.6.8', ecosystem: 'npm', direct: true },
-            { id: 'c5', name: 'jsonwebtoken', version: '9.0.2', ecosystem: 'npm', direct: false },
-          ];
-          setComponents(fallbackComps);
-          setComponentTotal(job.componentsFound || fallbackComps.length);
-          if (job.cvesFound > 0) {
-            setVulns([
-              {
-                id: 'v1',
-                cve: 'CVE-2024-21538',
-                package: 'axios',
-                version: '1.6.8',
-                project: job.targetProject,
-                cvss: 7.5,
-                epss: 0.12,
-                severity: 'High',
-                status: 'Open',
-                fixVersion: '1.7.4',
-                age: '3d ago',
-                description: 'Cross-Site Scripting (XSS) vulnerability in axios via follow-redirects module.',
-                cwe: 'CWE-79',
-                publishedDate: '2024-10-02',
-                vexStatus: 'affected',
-                exploitAvailable: true,
-                affectedVersions: '<= 1.6.8',
-                ecosystem: 'npm',
-              },
-            ]);
-            setVulnTotal(job.cvesFound);
-          } else {
-            setVulns([]);
-            setVulnTotal(0);
-          }
+          setComponents([]);
+          setComponentTotal(job.componentsFound || 0);
+          setVulns([]);
+          setVulnTotal(job.cvesFound || 0);
         }
       } finally {
         if (!cancelled) setLoadingResults(false);

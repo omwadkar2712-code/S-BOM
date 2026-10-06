@@ -7,8 +7,6 @@ import {
   FileCode,
   Layers,
   ChevronRight,
-  Ban,
-  RotateCcw,
 } from 'lucide-react';
 import type { ScanJob } from '../../types';
 
@@ -16,24 +14,12 @@ export interface ScanActionMenuProps {
   scan: ScanJob;
   onViewDetails: (scan: ScanJob) => void;
   onExport: (format: 'spdx' | 'cyclonedx', scanId: string) => void;
-  canCancel?: boolean;
-  canRescan?: boolean;
-  cancelling?: boolean;
-  rescanning?: boolean;
-  onCancel?: (scan: ScanJob) => void;
-  onRescan?: (scan: ScanJob) => void;
 }
 
 export const ScanActionMenu: React.FC<ScanActionMenuProps> = ({
   scan,
   onViewDetails,
   onExport,
-  canCancel = false,
-  canRescan = false,
-  cancelling = false,
-  rescanning = false,
-  onCancel,
-  onRescan,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [exportExpanded, setExportExpanded] = useState(true);
@@ -280,43 +266,6 @@ export const ScanActionMenu: React.FC<ScanActionMenuProps> = ({
                 </div>
               )}
             </div>
-
-            {/* Optional Additional Actions: Cancel / Rescan */}
-            {(canCancel || canRescan) && (
-              <div className="mt-1 pt-1 border-t border-gray-100 dark:border-gray-800/80">
-                {canCancel && onCancel && (
-                  <button
-                    type="button"
-                    disabled={cancelling}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsOpen(false);
-                      onCancel(scan);
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-xs font-medium rounded-lg text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    <Ban className="w-3.5 h-3.5" />
-                    <span>{cancelling ? 'Stopping scan…' : 'Cancel Scan'}</span>
-                  </button>
-                )}
-
-                {canRescan && onRescan && (
-                  <button
-                    type="button"
-                    disabled={rescanning}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsOpen(false);
-                      onRescan(scan);
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-xs font-medium rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    <RotateCcw className={`w-3.5 h-3.5 ${rescanning ? 'animate-spin' : ''}`} />
-                    <span>{rescanning ? 'Queuing…' : 'Rescan'}</span>
-                  </button>
-                )}
-              </div>
-            )}
           </div>,
           document.body
         )}

@@ -778,9 +778,14 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const downloadClientFile = () => {
       let content = '';
       const targetScan = scansHistory.find(s => s.id === exportId);
-      const projName = targetScan?.targetProject || 'squad1-sbom';
+      const projName = targetScan?.targetProject || 'sbom-project';
       let filename = `${projName.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}-${exportId || Date.now()}`;
       let mimeType = 'text/plain';
+
+      const scanComponents = targetScan
+        ? components.filter(c => c.project === targetScan.targetProject)
+        : components;
+      const exportComponents = scanComponents.length > 0 ? scanComponents : components;
 
       if (format === 'spdx') {
         filename += '.spdx.json';
@@ -790,23 +795,28 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           dataLicense: 'CC0-1.0',
           SPDXID: 'SPDXRef-DOCUMENT',
           name: `SPDX-${projName}`,
-          documentNamespace: `https://talakunchi.com/spdx/${exportId || 'export'}`,
+          documentNamespace: `https://spdx.org/spdxdocs/${exportId || 'export'}-${Date.now()}`,
           creationInfo: {
             created: new Date().toISOString(),
-            creators: ['Tool: SQUAD1 SBOM v2.8.4', 'Person: Asha Mehta (asha@talakunchi.com)'],
+            creators: [
+              'Tool: S-BOM Generator',
+              (targetScan as any)?.requestedBy ? `Person: ${(targetScan as any).requestedBy}` : 'Organization: Security Operations',
+            ],
           },
-          packages: components.map(c => ({
-            SPDXID: `SPDXRef-Package-${c.id}`,
+          packages: exportComponents.map(c => ({
+            SPDXID: `SPDXRef-Package-${c.id || c.name}`,
             name: c.name,
             versionInfo: c.version,
-            licenseConcluded: c.license,
-            externalRefs: [
-              {
-                referenceCategory: 'PACKAGE-MANAGER',
-                referenceType: 'purl',
-                referenceLocator: c.purl,
-              },
-            ],
+            licenseConcluded: c.license || 'NOASSERTION',
+            externalRefs: c.purl
+              ? [
+                  {
+                    referenceCategory: 'PACKAGE-MANAGER',
+                    referenceType: 'purl',
+                    referenceLocator: c.purl,
+                  },
+                ]
+              : [],
           })),
         }, null, 2);
       } else if (format === 'cyclonedx') {
@@ -823,15 +833,15 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               name: projName,
               version: targetScan?.releaseTag || '1.0.0',
             },
-            tools: [{ vendor: 'SQUAD1', name: 'SBOM Engine', version: '2.8.4' }],
-            authors: [{ name: 'Asha Mehta', email: 'asha@talakunchi.com' }],
+            tools: [{ vendor: 'S-BOM', name: 'SBOM Engine' }],
+            authors: (targetScan as any)?.requestedBy ? [{ name: (targetScan as any).requestedBy }] : [],
           },
-          components: components.map(c => ({
+          components: exportComponents.map(c => ({
             type: 'library',
             name: c.name,
             version: c.version,
             purl: c.purl,
-            licenses: [{ license: { id: c.license } }],
+            licenses: c.license ? [{ license: { id: c.license } }] : [],
           })),
         }, null, 2);
       } else if (format === 'csv') {

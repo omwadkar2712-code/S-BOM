@@ -197,21 +197,12 @@ export const SecurityScans: React.FC = () => {
   }>({
     name: 'squad1_bulk_scan_template.csv',
     size: '0.8 KB',
-    rowCount: 8,
-    uploadedAt: 'Verified Template',
+    rowCount: 0,
+    uploadedAt: 'Sample Template',
   });
 
   const [bulkFileError, setBulkFileError] = useState('');
-  const [bulkProjects, setBulkProjects] = useState<BulkProjectRow[]>([
-    { id: '1', project: 'Express', name: 'express', version: '4.21.2', source: 'https://github.com/expressjs/express', branch: 'master', ecosystem: 'npm', rowStatus: 'ready' },
-    { id: '2', project: 'Flask', name: 'flask', version: '3.1.0', source: 'https://github.com/pallets/flask', branch: 'main', ecosystem: 'PyPI', rowStatus: 'ready' },
-    { id: '3', project: 'Gson', name: 'gson', version: '2.11.0', source: 'https://github.com/google/gson', branch: 'main', ecosystem: 'Maven', rowStatus: 'ready' },
-    { id: '4', project: 'Gin', name: 'gin', version: '1.10.0', source: 'https://github.com/gin-gonic/gin', branch: 'master', ecosystem: 'Go', rowStatus: 'ready' },
-    { id: '5', project: 'Serde', name: 'serde', version: '1.0.217', source: 'https://github.com/serde-rs/serde', branch: 'master', ecosystem: 'Cargo', rowStatus: 'ready' },
-    { id: '6', project: 'Newtonsoft.Json', name: 'newtonsoft.json', version: '13.0.3', source: 'https://github.com/JamesNK/Newtonsoft.Json', branch: 'master', ecosystem: 'NuGet', rowStatus: 'ready' },
-    { id: '7', project: 'Guzzle', name: 'guzzle', version: '7.9.2', source: 'https://github.com/guzzle/guzzle', branch: '8.2', ecosystem: 'Packagist', rowStatus: 'ready' },
-    { id: '8', project: 'Nokogiri', name: 'nokogiri', version: '1.18.2', source: 'https://github.com/sparklemotion/nokogiri', branch: 'main', ecosystem: 'RubyGems', rowStatus: 'ready' },
-  ]);
+  const [bulkProjects, setBulkProjects] = useState<BulkProjectRow[]>([]);
 
   const handleDownloadSampleCsv = () => {
     const link = document.createElement('a');
@@ -769,41 +760,11 @@ export const SecurityScans: React.FC = () => {
 
                         {/* ACTIONS */}
                         <td className="py-3 pr-4 pl-3 text-right whitespace-nowrap">
-                          <div className="inline-flex items-center justify-end gap-1.5">
-                            {canCancel(s.status) && (
-                              <button
-                                type="button"
-                                disabled={cancellingId === s.id}
-                                onClick={() => handleCancel(s)}
-                                title="Stop this scan"
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:border-rose-300 hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <Ban className="w-3 h-3" />
-                                {cancellingId === s.id ? 'Stopping' : 'Cancel'}
-                              </button>
-                            )}
-                            {canRescan(s.status) && (
-                              <button
-                                type="button"
-                                disabled={rescanningId === s.id}
-                                onClick={() => handleRescan(s)}
-                                title="Run this scan again with the same source"
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <RotateCcw className={`w-3 h-3 ${rescanningId === s.id ? 'animate-spin' : ''}`} />
-                                {rescanningId === s.id ? 'Queuing' : 'Rescan'}
-                              </button>
-                            )}
+                          <div className="inline-flex items-center justify-end">
                             <ScanActionMenu
                               scan={s}
                               onViewDetails={(scan) => setSelectedScanId(scan.id)}
                               onExport={(format, scanId) => exportSBOM(format, scanId)}
-                              canCancel={canCancel(s.status)}
-                              canRescan={canRescan(s.status)}
-                              cancelling={cancellingId === s.id}
-                              rescanning={rescanningId === s.id}
-                              onCancel={handleCancel}
-                              onRescan={handleRescan}
                             />
                           </div>
                         </td>
@@ -2023,41 +1984,11 @@ export const SecurityScans: React.FC = () => {
                         <span className="text-orange-500 dark:text-orange-400 font-semibold">{job.highs || 0} High</span>
                       </td>
                       <td className="py-3 text-right">
-                        <div className="inline-flex items-center justify-end gap-2">
-                          {canCancel(job.status) && (
-                            <button
-                              type="button"
-                              disabled={cancellingId === job.id}
-                              onClick={() => handleCancel(job)}
-                              title="Stop this scan"
-                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-rose-300 hover:text-rose-700 dark:hover:text-rose-300 cursor-pointer disabled:opacity-50"
-                            >
-                              <Ban className="w-3 h-3" />
-                              {cancellingId === job.id ? 'Stopping' : 'Cancel'}
-                            </button>
-                          )}
-                          {canRescan(job.status) && (
-                            <button
-                              type="button"
-                              disabled={rescanningId === job.id}
-                              onClick={() => handleRescan(job)}
-                              title="Run this scan again with the same source"
-                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer disabled:opacity-50"
-                            >
-                              <RotateCcw className={`w-3 h-3 ${rescanningId === job.id ? 'animate-spin' : ''}`} />
-                              {rescanningId === job.id ? 'Queuing' : 'Rescan'}
-                            </button>
-                          )}
+                        <div className="inline-flex items-center justify-end">
                           <ScanActionMenu
                             scan={job}
                             onViewDetails={(scan) => setSelectedScanId(scan.id)}
                             onExport={(format, scanId) => exportSBOM(format, scanId)}
-                            canCancel={canCancel(job.status)}
-                            canRescan={canRescan(job.status)}
-                            cancelling={cancellingId === job.id}
-                            rescanning={rescanningId === job.id}
-                            onCancel={handleCancel}
-                            onRescan={handleRescan}
                           />
                         </div>
                       </td>

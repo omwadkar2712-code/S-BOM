@@ -678,7 +678,7 @@ export const SecurityScans: React.FC = () => {
                     <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">SCAN DATE</th>
                     <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">SCAN STATUS</th>
                     <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">SCAN TYPE</th>
-                    <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">SCAN REQUESTED BY</th>
+                    <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">CREATED BY</th>
                     <th className="py-2.5 pr-4 pl-3 font-bold uppercase tracking-wider text-[11px] text-right whitespace-nowrap">ACTIONS</th>
                   </tr>
                 </thead>
@@ -765,6 +765,8 @@ export const SecurityScans: React.FC = () => {
                               scan={s}
                               onViewDetails={(scan) => setSelectedScanId(scan.id)}
                               onExport={(format, scanId) => exportSBOM(format, scanId)}
+                              onRescan={handleRescan}
+                              rescanning={rescanningId === s.id}
                             />
                           </div>
                         </td>
@@ -1945,6 +1947,7 @@ export const SecurityScans: React.FC = () => {
                     <th className="pb-3 font-semibold">SOURCE</th>
                     <th className="pb-3 font-semibold">STATUS</th>
                     <th className="pb-3 font-semibold">SUBMITTED</th>
+                    <th className="pb-3 font-semibold">CREATED BY</th>
                     <th className="pb-3 font-semibold">COMPONENTS</th>
                     <th className="pb-3 font-semibold">FINDINGS</th>
                     <th className="pb-3 font-semibold text-right">ACTION</th>
@@ -1978,6 +1981,9 @@ export const SecurityScans: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-3 text-gray-500 dark:text-gray-400">{job.timestamp}</td>
+                      <td className="py-3 text-gray-700 dark:text-gray-300 font-medium">
+                        {(job as any).requestedBy || (job as any).createdBy || 'SecOps Admin'}
+                      </td>
                       <td className="py-3 font-semibold text-gray-900 dark:text-white">{job.componentsFound}</td>
                       <td className="py-3">
                         <span className="text-red-600 dark:text-red-400 font-semibold">{job.criticals || 0} Crit</span> •{' '}
@@ -1989,6 +1995,8 @@ export const SecurityScans: React.FC = () => {
                             scan={job}
                             onViewDetails={(scan) => setSelectedScanId(scan.id)}
                             onExport={(format, scanId) => exportSBOM(format, scanId)}
+                            onRescan={handleRescan}
+                            rescanning={rescanningId === job.id}
                           />
                         </div>
                       </td>

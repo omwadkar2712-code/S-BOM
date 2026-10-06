@@ -612,17 +612,7 @@ export const SoftwareInventory: React.FC = () => {
               <span>Upload File</span>
             </button>
 
-            {/* Upload SBOM Button */}
-            <button
-              onClick={() => setUploadModalOpen(true)}
-              className="px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50/40 dark:hover:bg-blue-950/30 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1.5 shadow-2xs cursor-pointer whitespace-nowrap transition-all"
-              title="Upload Existing SBOM"
-            >
-              <div className="w-4 h-4 rounded bg-blue-50 dark:bg-blue-950/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-                <Upload className="w-2.5 h-2.5" />
-              </div>
-              <span>Upload SBOM</span>
-            </button>
+
 
             {/* Export CSV Button */}
             <button

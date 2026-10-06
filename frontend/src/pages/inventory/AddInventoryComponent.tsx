@@ -28,7 +28,7 @@ export const AddInventoryComponent: React.FC = () => {
   const [purl, setPurl] = useState('');
   const [purlManuallyEdited, setPurlManuallyEdited] = useState(false);
   const [riskLevel, setRiskLevel] = useState<Severity | 'Safe'>('Safe');
-  const [createdBy, setCreatedBy] = useState('SecOps Admin');
+  const [createdBy, setCreatedBy] = useState('');
 
   // Modal State for Upload File
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -165,17 +165,6 @@ export const AddInventoryComponent: React.FC = () => {
             </p>
           </div>
         </div>
-
-        {/* Upload File Button */}
-        <button
-          type="button"
-          onClick={() => setUploadModalOpen(true)}
-          className="px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-lg shadow-sm shadow-emerald-500/20 flex items-center gap-2 cursor-pointer transition-all shrink-0 self-start sm:self-auto hover:scale-[1.01]"
-          title="Upload Excel or CSV file"
-        >
-          <Upload className="w-3.5 h-3.5" />
-          <span>Upload File</span>
-        </button>
       </div>
 
       {/* Single Unified Full Form Card */}
@@ -396,7 +385,7 @@ export const AddInventoryComponent: React.FC = () => {
                 />
               </div>
 
-              {/* Created By (Styled the same way as Package URL) */}
+              {/* Created By */}
               <div>
                 <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight mb-1">
                   Created By
@@ -405,8 +394,8 @@ export const AddInventoryComponent: React.FC = () => {
                   type="text"
                   value={createdBy}
                   onChange={(e) => setCreatedBy(e.target.value)}
-                  placeholder="e.g. SecOps Admin, Jane Doe"
-                  className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-gray-850 transition-colors shadow-2xs"
+                  placeholder="e.g. SecOps Admin"
+                  className="w-full px-2.5 py-1.5 text-xs bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-gray-850 transition-colors shadow-2xs"
                 />
               </div>
             </div>
@@ -421,14 +410,25 @@ export const AddInventoryComponent: React.FC = () => {
             >
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm shadow-blue-500/20 flex items-center gap-1.5 cursor-pointer transition-all hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{saving ? 'Saving…' : 'Save & Add Component'}</span>
-            </button>
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setUploadModalOpen(true)}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm shadow-blue-500/20 flex items-center gap-1.5 cursor-pointer transition-all hover:scale-[1.01]"
+                title="Upload Excel or CSV file"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Upload File</span>
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm shadow-blue-500/20 flex items-center gap-1.5 cursor-pointer transition-all hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{saving ? 'Saving…' : 'Save & Add Component'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

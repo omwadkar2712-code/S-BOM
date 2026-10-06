@@ -7,6 +7,7 @@ import {
   FileCode,
   Layers,
   ChevronRight,
+  RotateCcw,
 } from 'lucide-react';
 import type { ScanJob } from '../../types';
 
@@ -14,12 +15,16 @@ export interface ScanActionMenuProps {
   scan: ScanJob;
   onViewDetails: (scan: ScanJob) => void;
   onExport: (format: 'spdx' | 'cyclonedx', scanId: string) => void;
+  onRescan?: (scan: ScanJob) => void;
+  rescanning?: boolean;
 }
 
 export const ScanActionMenu: React.FC<ScanActionMenuProps> = ({
   scan,
   onViewDetails,
   onExport,
+  onRescan,
+  rescanning = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [exportExpanded, setExportExpanded] = useState(true);
@@ -266,6 +271,34 @@ export const ScanActionMenu: React.FC<ScanActionMenuProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Option 3: Rescan */}
+            {onRescan && (
+              <div className="mt-1 pt-1 border-t border-gray-100 dark:border-gray-800/80">
+                <button
+                  type="button"
+                  disabled={rescanning}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsOpen(false);
+                    onRescan(scan);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer disabled:opacity-50 group"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <RotateCcw className={`w-3.5 h-3.5 ${rescanning ? 'animate-spin text-blue-600' : ''}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                      {rescanning ? 'Queuing…' : 'Rescan'}
+                    </div>
+                    <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+                      Run scan again with same source
+                    </div>
+                  </div>
+                </button>
+              </div>
+            )}
           </div>,
           document.body
         )}

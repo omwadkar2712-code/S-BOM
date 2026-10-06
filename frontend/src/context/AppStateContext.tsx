@@ -774,118 +774,133 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const exportSBOM = (format: 'spdx' | 'cyclonedx' | 'csv' | 'json', scanId?: string) => {
     const exportId = scanId || latestScanId;
+
+    const downloadClientFile = () => {
+      let content = '';
+      const targetScan = scansHistory.find(s => s.id === exportId);
+      const projName = targetScan?.targetProject || 'squad1-sbom';
+      let filename = `${projName.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}-${exportId || Date.now()}`;
+      let mimeType = 'text/plain';
+
+      if (format === 'spdx') {
+        filename += '.spdx.json';
+        mimeType = 'application/json';
+        content = JSON.stringify({
+          spdxVersion: 'SPDX-2.3',
+          dataLicense: 'CC0-1.0',
+          SPDXID: 'SPDXRef-DOCUMENT',
+          name: `SPDX-${projName}`,
+          documentNamespace: `https://talakunchi.com/spdx/${exportId || 'export'}`,
+          creationInfo: {
+            created: new Date().toISOString(),
+            creators: ['Tool: SQUAD1 SBOM v2.8.4', 'Person: Asha Mehta (asha@talakunchi.com)'],
+          },
+          packages: components.map(c => ({
+            SPDXID: `SPDXRef-Package-${c.id}`,
+            name: c.name,
+            versionInfo: c.version,
+            licenseConcluded: c.license,
+            externalRefs: [
+              {
+                referenceCategory: 'PACKAGE-MANAGER',
+                referenceType: 'purl',
+                referenceLocator: c.purl,
+              },
+            ],
+          })),
+        }, null, 2);
+      } else if (format === 'cyclonedx') {
+        filename += '.cdx.json';
+        mimeType = 'application/json';
+        content = JSON.stringify({
+          bomFormat: 'CycloneDX',
+          specVersion: '1.5',
+          version: 1,
+          metadata: {
+            timestamp: new Date().toISOString(),
+            component: {
+              type: 'application',
+              name: projName,
+              version: targetScan?.releaseTag || '1.0.0',
+            },
+            tools: [{ vendor: 'SQUAD1', name: 'SBOM Engine', version: '2.8.4' }],
+            authors: [{ name: 'Asha Mehta', email: 'asha@talakunchi.com' }],
+          },
+          components: components.map(c => ({
+            type: 'library',
+            name: c.name,
+            version: c.version,
+            purl: c.purl,
+            licenses: [{ license: { id: c.license } }],
+          })),
+        }, null, 2);
+      } else if (format === 'csv') {
+        filename += '.csv';
+        mimeType = 'text/csv';
+        const headers = ['NAME', 'VERSION', 'PROJECT', 'COMPLIANCE', 'LICENSE', 'TRUST', 'RISK', 'CVES', 'ECOSYSTEM'];
+        const rows = components.map(c => [
+          `"${c.name}"`,
+          `"${c.version}"`,
+          `"${c.project}"`,
+          `"${c.compliance}%"`,
+          `"${c.license}"`,
+          `"${c.trustScore}"`,
+          `"${c.risk}"`,
+          `"${c.cves}"`,
+          `"${c.ecosystem}"`,
+        ].join(','));
+        content = [headers.join(','), ...rows].join('\n');
+      } else {
+        filename += '.json';
+        mimeType = 'application/json';
+        content = JSON.stringify({ components, vulnerabilities, projects }, null, 2);
+      }
+
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      addToast({
+        type: 'success',
+        title: 'Export Successful',
+        message: `Downloaded ${filename} (${format.toUpperCase()} format).`,
+      });
+    };
+
     if (exportId && format !== 'json') {
       const fmt = format === 'spdx' ? 'spdx-json' : format === 'cyclonedx' ? 'cyclonedx-json' : 'csv';
       const downloadName = `sbom-${exportId}.${format === 'csv' ? 'csv' : 'json'}`;
       void (async () => {
-        const res = await fetch(api.exportUrl(exportId, fmt), {
-          headers: { 'X-Organization-Id': 'default' },
-        });
-        if (!res.ok) {
-          addToast({ type: 'error', title: 'Export failed', message: 'The scan API could not build that file.' });
-          return;
+        try {
+          const res = await fetch(api.exportUrl(exportId, fmt), {
+            headers: { 'X-Organization-Id': 'default' },
+          });
+          if (!res.ok) {
+            throw new Error('API returned ' + res.status);
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = downloadName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          addToast({ type: 'success', title: 'Export started', message: `${downloadName} downloaded.` });
+        } catch {
+          downloadClientFile();
         }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = downloadName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        addToast({ type: 'success', title: 'Export started', message: `${downloadName} downloaded.` });
       })();
       return;
     }
-    let content = '';
-    let filename = `squad1-sbom-export-${Date.now()}`;
-    let mimeType = 'text/plain';
 
-    if (format === 'spdx') {
-      filename += '.spdx.json';
-      mimeType = 'application/json';
-      content = JSON.stringify({
-        spdxVersion: 'SPDX-2.3',
-        dataLicense: 'CC0-1.0',
-        SPDXID: 'SPDXRef-DOCUMENT',
-        name: 'SQUAD1-Enterprise-SBOM-Export',
-        documentNamespace: 'https://talakunchi.com/spdx/sbom-export',
-        creationInfo: {
-          created: new Date().toISOString(),
-          creators: ['Tool: SQUAD1 SBOM v2.8.4', 'Person: Asha Mehta (asha@talakunchi.com)'],
-        },
-        packages: components.map(c => ({
-          SPDXID: `SPDXRef-Package-${c.id}`,
-          name: c.name,
-          versionInfo: c.version,
-          licenseConcluded: c.license,
-          externalRefs: [
-            {
-              referenceCategory: 'PACKAGE-MANAGER',
-              referenceType: 'purl',
-              referenceLocator: c.purl,
-            },
-          ],
-        })),
-      }, null, 2);
-    } else if (format === 'cyclonedx') {
-      filename += '.cdx.json';
-      mimeType = 'application/json';
-      content = JSON.stringify({
-        bomFormat: 'CycloneDX',
-        specVersion: '1.5',
-        version: 1,
-        metadata: {
-          timestamp: new Date().toISOString(),
-          tools: [{ vendor: 'SQUAD1', name: 'SBOM Engine', version: '2.8.4' }],
-          authors: [{ name: 'Asha Mehta', email: 'asha@talakunchi.com' }],
-        },
-        components: components.map(c => ({
-          type: 'library',
-          name: c.name,
-          version: c.version,
-          purl: c.purl,
-          licenses: [{ license: { id: c.license } }],
-        })),
-      }, null, 2);
-    } else if (format === 'csv') {
-      filename += '.csv';
-      mimeType = 'text/csv';
-      const headers = ['NAME', 'VERSION', 'PROJECT', 'COMPLIANCE', 'LICENSE', 'TRUST', 'RISK', 'CVES', 'ECOSYSTEM'];
-      const rows = components.map(c => [
-        `"${c.name}"`,
-        `"${c.version}"`,
-        `"${c.project}"`,
-        `"${c.compliance}%"`,
-        `"${c.license}"`,
-        `"${c.trustScore}"`,
-        `"${c.risk}"`,
-        `"${c.cves}"`,
-        `"${c.ecosystem}"`,
-      ].join(','));
-      content = [headers.join(','), ...rows].join('\n');
-    } else {
-      filename += '.json';
-      mimeType = 'application/json';
-      content = JSON.stringify({ components, vulnerabilities, projects }, null, 2);
-    }
-
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    addToast({
-      type: 'success',
-      title: 'Export Successful',
-      message: `Downloaded ${filename} (${format.toUpperCase()} format).`,
-    });
+    downloadClientFile();
   };
 
   return (

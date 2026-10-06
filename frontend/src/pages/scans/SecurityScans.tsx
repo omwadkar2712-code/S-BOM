@@ -42,6 +42,7 @@ import { filesFromDataTransfer, folderLabel, folderTypeLabel, isArchiveName, isM
 import { classifyBulkCsv } from './bulkRows';
 import { PipelineGrid, ScanResultDetails } from './ScanResultDetails';
 import { displayStatus, formatDuration, formatEventTime, isOpenStatus, stageLabel } from './scanProgress';
+import { ScanActionMenu } from './ScanActionMenu';
 
 export const SecurityScans: React.FC = () => {
   const { tab } = useParams<{ tab?: string }>();
@@ -793,12 +794,17 @@ export const SecurityScans: React.FC = () => {
                                 {rescanningId === s.id ? 'Queuing' : 'Rescan'}
                               </button>
                             )}
-                            <button
-                              onClick={() => setSelectedScanId(s.id)}
-                              className="px-2.5 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer"
-                            >
-                              View Details
-                            </button>
+                            <ScanActionMenu
+                              scan={s}
+                              onViewDetails={(scan) => setSelectedScanId(scan.id)}
+                              onExport={(format, scanId) => exportSBOM(format, scanId)}
+                              canCancel={canCancel(s.status)}
+                              canRescan={canRescan(s.status)}
+                              cancelling={cancellingId === s.id}
+                              rescanning={rescanningId === s.id}
+                              onCancel={handleCancel}
+                              onRescan={handleRescan}
+                            />
                           </div>
                         </td>
                       </tr>
@@ -2042,12 +2048,17 @@ export const SecurityScans: React.FC = () => {
                               {rescanningId === job.id ? 'Queuing' : 'Rescan'}
                             </button>
                           )}
-                          <button
-                            onClick={() => setSelectedScanId(job.id)}
-                            className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
-                          >
-                            View Details
-                          </button>
+                          <ScanActionMenu
+                            scan={job}
+                            onViewDetails={(scan) => setSelectedScanId(scan.id)}
+                            onExport={(format, scanId) => exportSBOM(format, scanId)}
+                            canCancel={canCancel(job.status)}
+                            canRescan={canRescan(job.status)}
+                            cancelling={cancellingId === job.id}
+                            rescanning={rescanningId === job.id}
+                            onCancel={handleCancel}
+                            onRescan={handleRescan}
+                          />
                         </div>
                       </td>
                     </tr>

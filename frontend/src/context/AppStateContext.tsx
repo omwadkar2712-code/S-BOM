@@ -148,7 +148,8 @@ interface AppStateContextType {
   cancelScan: (job: ScanJob) => Promise<void>;
   
   addProject: (newProj: Partial<Project>) => void;
-  addComponent: (newComp: Partial<SBOMComponent>) => void;
+  addComponent: (newComp: Partial<SBOMComponent>) => Promise<void>;
+  addComponents: (items: Partial<SBOMComponent>[]) => Promise<void>;
   updateTicketStatus: (id: string, status: RemediationTicket['status']) => void;
   togglePolicy: (id: string) => void;
   
@@ -243,7 +244,10 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (async () => {
       try {
         await api.healthReady();
-        const scans = await api.listScans();
+        const [scans, inventory] = await Promise.all([
+          api.listScans(),
+          api.listInventoryComponents().catch(() => [] as api.ApiInventoryComponent[]),
+        ]);
         if (cancelled) return;
         setSystemStatus(prev => ({ ...prev, scanApi: 'connected', postgres: 'connected' }));
         if (scans?.length) {
@@ -284,6 +288,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             await loadScanResults(done.id, done.project_id || '', done.application_name || '');
           }
           if (completed.length) setLatestScanId(completed[completed.length - 1].id);
+        }
+        if (!cancelled && inventory.length) {
+          const saved = inventory.map(api.mapInventoryComponent);
+          const ids = new Set(saved.map((component) => component.id));
+          setComponents((prev) => [...saved, ...prev.filter((component) => !ids.has(component.id))]);
         }
       } catch {
         if (!cancelled) {
@@ -698,34 +707,40 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
-  const addComponent = (newComp: Partial<SBOMComponent>) => {
-    const comp: SBOMComponent = {
-      id: `comp-${Date.now()}`,
-      name: newComp.name || 'new-package',
-      packageName: newComp.packageName || newComp.name || 'new-package',
-      version: newComp.version || '1.0.0',
-      project: newComp.project || 'payments-api',
-      projectApplication: newComp.projectApplication || 'backend-api',
-      fieldType: newComp.fieldType || 'Library',
-      compliance: newComp.compliance || 95.0,
-      license: newComp.license || 'MIT',
-      trustScore: newComp.trustScore || 90,
-      risk: newComp.risk || 'Safe',
-      cves: newComp.cves !== undefined ? newComp.cves : 0,
-      patchAvailable: newComp.patchAvailable || false,
-      vex: newComp.vex || 'not_affected',
-      eol: false,
-      ecosystem: newComp.ecosystem || 'npm',
-      criticality: newComp.criticality || 'Medium',
-      directDependency: newComp.directDependency !== undefined ? newComp.directDependency : true,
-      supplier: newComp.supplier || 'Open Source Community',
-      purl: newComp.purl || `pkg:npm/${newComp.name || 'package'}@${newComp.version || '1.0.0'}`,
-    };
-    setComponents(prev => [comp, ...prev]);
+  const rememberComponents = (comps: SBOMComponent[]) => {
+    if (!comps.length) return;
+    const ids = new Set(comps.map((component) => component.id));
+    setComponents((prev) => [...comps, ...prev.filter((component) => !ids.has(component.id))]);
+  };
+
+  const addComponents = async (items: Partial<SBOMComponent>[]) => {
+    if (!items.length) return;
+    const saved = await api.createInventoryComponents(items.map((item) => ({
+      project: item.project || '',
+      project_application: item.projectApplication || '',
+      name: item.name || '',
+      package_name: item.packageName || item.name || '',
+      version: item.version || '',
+      field_type: item.fieldType,
+      license: item.license,
+      cves: item.cves,
+      ecosystem: item.ecosystem,
+      risk: item.risk,
+      purl: item.purl,
+      direct_dependency: item.directDependency,
+      supplier: item.supplier,
+    })));
+    rememberComponents(saved.map(api.mapInventoryComponent));
+  };
+
+  const addComponent = async (newComp: Partial<SBOMComponent>) => {
+    await addComponents([newComp]);
+    const name = newComp.name || 'new-package';
+    const version = newComp.version || '1.0.0';
     addToast({
       type: 'success',
       title: 'Inventory Item Added',
-      message: `Component "${comp.name}@${comp.version}" added to Software Inventory.`,
+      message: `Component "${name}@${version}" added to Software Inventory.`,
     });
   };
 
@@ -906,6 +921,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         cancelScan,
         addProject,
         addComponent,
+        addComponents,
         updateTicketStatus,
         togglePolicy,
         toasts,

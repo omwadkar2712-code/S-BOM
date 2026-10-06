@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useAppState } from '../../context/AppStateContext';
 import { ComponentFieldType, LicenseType, Severity, Ecosystem } from '../../types';
+import { parseUploadedSbom, type ParsedSbomUpload } from './parseUploadedSbom';
 
 // Client-side CSV export helper
 const exportTableToCsv = (filename: string, rows: (string | number)[][]) => {
@@ -50,7 +51,7 @@ const exportTableToCsv = (filename: string, rows: (string | number)[][]) => {
 
 export const SoftwareInventory: React.FC = () => {
   const navigate = useNavigate();
-  const { addToast, components, projects, setAddDependencyModalOpen, addComponent } = useAppState();
+  const { addToast, components, projects, setAddDependencyModalOpen, addComponents } = useAppState();
 
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -70,8 +71,9 @@ export const SoftwareInventory: React.FC = () => {
   const [manifestFileName, setManifestFileName] = useState<string | null>(null);
 
   // Upload SBOM form state
-  const [sbomUploadFormat, setSbomUploadFormat] = useState('SPDX-2.3');
   const [sbomUploadFileName, setSbomUploadFileName] = useState<string | null>(null);
+  const [parsedSbom, setParsedSbom] = useState<ParsedSbomUpload | null>(null);
+  const [sbomParseError, setSbomParseError] = useState<string | null>(null);
 
   // Catalog components with Project Name, Project Application, and Field Type
   const mockComponents: Array<{
@@ -189,6 +191,67 @@ export const SoftwareInventory: React.FC = () => {
       type: 'success',
       title: 'CSV Export Generated',
       message: `Exported ${dataToExport.length} components to CSV.`,
+    });
+  };
+
+  const resetSbomUpload = () => {
+    setSbomUploadFileName(null);
+    setParsedSbom(null);
+    setSbomParseError(null);
+  };
+
+  const closeUploadModal = () => {
+    setUploadModalOpen(false);
+    resetSbomUpload();
+  };
+
+  const readSbomFile = (file: File) => {
+    setSbomUploadFileName(file.name);
+    setParsedSbom(null);
+    setSbomParseError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = parseUploadedSbom(String(reader.result || ''), file.name);
+        if (!parsed.rows.length) {
+          setSbomParseError('No components were found in this SBOM.');
+          return;
+        }
+        setParsedSbom(parsed);
+      } catch (error) {
+        setSbomParseError(error instanceof Error ? error.message : 'This file could not be read.');
+      }
+    };
+    reader.onerror = () => setSbomParseError('This file could not be read.');
+    reader.readAsText(file);
+  };
+
+  const handleIngestSbom = async () => {
+    if (!parsedSbom || parsedSbom.rows.length === 0) {
+      addToast({
+        type: 'warning',
+        title: 'Choose an SBOM file',
+        message: sbomParseError || 'Supported file formats are CycloneDX and SPDX.',
+      });
+      return;
+    }
+    const count = parsedSbom.rows.length;
+    const format = parsedSbom.format;
+    try {
+      await addComponents(parsedSbom.rows);
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Could not save SBOM',
+        message: error instanceof Error ? error.message : 'The SBOM was not saved to the database.',
+      });
+      return;
+    }
+    closeUploadModal();
+    addToast({
+      type: 'success',
+      title: 'SBOM Uploaded',
+      message: `Added ${count} component${count === 1 ? '' : 's'} from ${format} into the inventory.`,
     });
   };
 
@@ -1025,7 +1088,7 @@ export const SoftwareInventory: React.FC = () => {
               </div>
               <button
                 type="button"
-                onClick={() => setUploadModalOpen(false)}
+                onClick={closeUploadModal}
                 className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
                 title="Close"
               >
@@ -1035,41 +1098,50 @@ export const SoftwareInventory: React.FC = () => {
 
             {/* Body */}
             <div className="p-6 space-y-5">
-              {/* Format Selection */}
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-2">
-                  Expected SBOM Format
-                </label>
-                <select
-                  value={sbomUploadFormat}
-                  onChange={(e) => setSbomUploadFormat(e.target.value)}
-                  className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/80 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer shadow-2xs"
-                >
-                  <option value="SPDX-2.3">SPDX 2.3 (JSON Specification)</option>
-                  <option value="SPDX-2.2">SPDX 2.2 (Tag/Value & JSON)</option>
-                  <option value="CycloneDX-1.5">CycloneDX 1.5 (JSON / XML)</option>
-                  <option value="CycloneDX-1.6">CycloneDX 1.6 (Latest ECMA-424)</option>
-                </select>
-              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-300">
+                Supported file formats are CycloneDX and SPDX.
+              </p>
 
               {/* Upload Dropzone */}
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-2">
                   SBOM Artifact File
                 </label>
-                <div className="relative border-2 border-dashed border-blue-200/90 dark:border-blue-900/60 hover:border-blue-500 dark:hover:border-blue-400 rounded-2xl p-7 text-center bg-gradient-to-b from-blue-50/30 to-slate-50/50 dark:from-blue-950/20 dark:to-slate-900/20 transition-all group">
+                <div
+                  className="relative border-2 border-dashed border-blue-200/90 dark:border-blue-900/60 hover:border-blue-500 dark:hover:border-blue-400 rounded-2xl p-7 text-center bg-gradient-to-b from-blue-50/30 to-slate-50/50 dark:from-blue-950/20 dark:to-slate-900/20 transition-all group"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) readSbomFile(file);
+                  }}
+                >
                   <div className="w-12 h-12 rounded-2xl bg-blue-100/80 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-3 group-hover:scale-105 transition-transform shadow-2xs">
                     <Upload className="w-5 h-5" />
                   </div>
                   {sbomUploadFileName ? (
                     <div className="space-y-1">
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-full text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
+                        sbomParseError
+                          ? 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+                          : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                      }`}>
+                        {sbomParseError ? <X className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                         <span>{sbomUploadFileName}</span>
                       </span>
                       <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                        Ready for verification and catalog ingestion
+                        {parsedSbom
+                          ? `${parsedSbom.format} · ${parsedSbom.rows.length} component${parsedSbom.rows.length === 1 ? '' : 's'} ready for the inventory`
+                          : sbomParseError
+                          ? 'Choose a CycloneDX or SPDX file'
+                          : 'Reading SBOM…'}
                       </p>
+                      <label
+                        htmlFor="sbom-upload-file"
+                        className="inline-block text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                      >
+                        Choose a different file
+                      </label>
                     </div>
                   ) : (
                     <div>
@@ -1082,21 +1154,18 @@ export const SoftwareInventory: React.FC = () => {
                           browse files
                         </label>
                       </p>
-                      <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                        Accepts .json, .spdx, .xml, .yaml (up to 50MB)
-                      </p>
                     </div>
                   )}
 
                   <input
                     type="file"
                     id="sbom-upload-file"
-                    accept=".json,.spdx,.xml,.yaml"
+                    accept=".json,.spdx,.xml,.yaml,.yml"
                     className="hidden"
                     onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        setSbomUploadFileName(e.target.files[0].name);
-                      }
+                      const file = e.target.files?.[0];
+                      if (file) readSbomFile(file);
+                      e.target.value = '';
                     }}
                   />
 
@@ -1109,6 +1178,9 @@ export const SoftwareInventory: React.FC = () => {
                     </label>
                   )}
                 </div>
+                {sbomParseError && (
+                  <p className="mt-2 text-[11px] font-medium text-red-600 dark:text-red-400">{sbomParseError}</p>
+                )}
               </div>
             </div>
 
@@ -1116,22 +1188,16 @@ export const SoftwareInventory: React.FC = () => {
             <div className="px-6 py-4 bg-gray-50/70 dark:bg-gray-850/70 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end gap-3">
               <button
                 type="button"
-                onClick={() => setUploadModalOpen(false)}
+                onClick={closeUploadModal}
                 className="px-4 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer shadow-2xs"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setUploadModalOpen(false);
-                  addToast({
-                    type: 'success',
-                    title: 'SBOM Uploaded',
-                    message: `Imported ${sbomUploadFileName || 'SBOM artifact'} into catalog.`,
-                  });
-                }}
-                className="px-5 py-2 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-xl shadow-md shadow-blue-500/20 flex items-center gap-2 cursor-pointer transition-all"
+                onClick={handleIngestSbom}
+                disabled={!parsedSbom}
+                className="px-5 py-2 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-xl shadow-md shadow-blue-500/20 flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Upload className="w-3.5 h-3.5" />
                 <span>Upload & Ingest</span>

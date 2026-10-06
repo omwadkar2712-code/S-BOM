@@ -410,6 +410,29 @@ def build(cfg: Config | None = None) -> FastAPI:
         snaps = [snap for snap in boms.list_for_application(application_id, 50) if snap.get("organization_id") == org]
         return _envelope(snaps, rid(request))
 
+    @app.get("/api/v1/inventory/components")
+    def list_inventory(request: Request, limit: int = 200, cursor: str = ""):
+        try:
+            page = boms.list_inventory_components(_org(request), limit=limit, cursor=cursor or None)
+        except ValueError as exc:
+            return _error("INVALID_INPUT", str(exc), rid(request), 400)
+        return _envelope(page, rid(request))
+
+    @app.post("/api/v1/inventory/components")
+    async def create_inventory(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            return _error("INVALID_INPUT", "malformed JSON body", rid(request), 400)
+        items = body.get("components") if isinstance(body, dict) else None
+        if not isinstance(items, list) or not items:
+            return _error("INVALID_INPUT", "components are required", rid(request), 400)
+        try:
+            saved = boms.add_inventory_components(_org(request), items)
+        except ValueError as exc:
+            return _error("INVALID_INPUT", str(exc), rid(request), 400)
+        return _envelope(saved, rid(request), 201)
+
     @app.post("/api/v1/scans/bulk")
     async def bulk_upload(request: Request, file: UploadFile | None = File(default=None), project_name: str = Form(default="")):
         if file is None or not file.filename:

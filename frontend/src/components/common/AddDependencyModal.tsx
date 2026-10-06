@@ -4,7 +4,7 @@ import { X, PackagePlus, Box, Info } from 'lucide-react';
 import { Ecosystem, LicenseType, ComponentFieldType, Severity } from '../../types';
 
 export const AddDependencyModal: React.FC = () => {
-  const { addDependencyModalOpen, setAddDependencyModalOpen, addComponent, projects } = useAppState();
+  const { addDependencyModalOpen, setAddDependencyModalOpen, addComponent, addToast, projects } = useAppState();
   
   // Field States matching the Software Inventory table exactly
   const [projectName, setProjectName] = useState(projects[0]?.name || 'payments-api');
@@ -31,7 +31,7 @@ export const AddDependencyModal: React.FC = () => {
 
   if (!addDependencyModalOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() && !packageName.trim()) return;
 
@@ -39,23 +39,32 @@ export const AddDependencyModal: React.FC = () => {
     const pkgName = packageName.trim() || compName;
     const finalPurl = purl.trim() || `pkg:${ecosystem.toLowerCase()}/${pkgName}@${version.trim()}`;
 
-    addComponent({
-      name: compName,
-      packageName: pkgName,
-      version: version.trim() || '1.0.0',
-      project: projectName.trim() || 'payments-api',
-      projectApplication: projectApplication.trim() || 'backend-api',
-      fieldType,
-      ecosystem,
-      license,
-      supplier: supplier.trim() || 'Open Source Project',
-      directDependency,
-      compliance: 95.0,
-      trustScore: 92,
-      risk: riskLevel,
-      cves: Number(vulnerabilities) || 0,
-      purl: finalPurl,
-    });
+    try {
+      await addComponent({
+        name: compName,
+        packageName: pkgName,
+        version: version.trim() || '1.0.0',
+        project: projectName.trim() || 'payments-api',
+        projectApplication: projectApplication.trim() || 'backend-api',
+        fieldType,
+        ecosystem,
+        license,
+        supplier: supplier.trim() || 'Open Source Project',
+        directDependency,
+        compliance: 95.0,
+        trustScore: 92,
+        risk: riskLevel,
+        cves: Number(vulnerabilities) || 0,
+        purl: finalPurl,
+      });
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Could not save component',
+        message: error instanceof Error ? error.message : 'The component was not saved to the database.',
+      });
+      return;
+    }
 
     setName('');
     setPackageName('');

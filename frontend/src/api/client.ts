@@ -1,4 +1,4 @@
-import type { BulkScanItemView, Ecosystem, LicenseType, SBOMComponent, ScanEventView, ScanJob, ScanStatus, Severity, Vulnerability } from '../types';
+import type { BulkScanItemView, ComponentFieldType, Ecosystem, LicenseType, SBOMComponent, ScanEventView, ScanJob, ScanStatus, Severity, Vulnerability } from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE || '';
 
@@ -101,6 +101,90 @@ export interface ApiEvent {
   stage: string;
   message: string;
   created_at: string;
+}
+
+export interface ApiInventoryComponent {
+  id: string;
+  name: string;
+  package_name: string;
+  version: string;
+  project: string;
+  project_application: string;
+  field_type: ComponentFieldType;
+  license: string;
+  cves: number;
+  purl: string;
+  risk: Severity | 'Safe';
+  ecosystem: Ecosystem;
+  direct: boolean;
+  supplier: string;
+}
+
+export interface InventoryComponentInput {
+  project: string;
+  project_application: string;
+  name: string;
+  package_name?: string;
+  version: string;
+  field_type?: ComponentFieldType;
+  license?: string;
+  cves?: number;
+  ecosystem?: Ecosystem;
+  risk?: Severity | 'Safe';
+  purl?: string;
+  direct_dependency?: boolean;
+  supplier?: string;
+}
+
+interface InventoryPage {
+  items: ApiInventoryComponent[];
+  next_cursor: string | null;
+}
+
+export async function listInventoryComponents(): Promise<ApiInventoryComponent[]> {
+  const items: ApiInventoryComponent[] = [];
+  let cursor = '';
+  for (let page = 0; page < 1000; page += 1) {
+    const query = new URLSearchParams({ limit: '500' });
+    if (cursor) query.set('cursor', cursor);
+    const data = await request<InventoryPage>(`/api/v1/inventory/components?${query.toString()}`);
+    items.push(...(data?.items || []));
+    if (!data?.next_cursor) break;
+    cursor = data.next_cursor;
+  }
+  return items;
+}
+
+export function createInventoryComponents(components: InventoryComponentInput[]): Promise<ApiInventoryComponent[]> {
+  return request<ApiInventoryComponent[]>('/api/v1/inventory/components', {
+    method: 'POST',
+    body: JSON.stringify({ components }),
+  });
+}
+
+export function mapInventoryComponent(row: ApiInventoryComponent): SBOMComponent {
+  return {
+    id: row.id,
+    name: row.name,
+    packageName: row.package_name || row.name,
+    version: row.version,
+    project: row.project,
+    projectApplication: row.project_application,
+    fieldType: row.field_type || 'Library',
+    license: mapLicense(row.license),
+    trustScore: 90,
+    risk: row.risk || 'Safe',
+    cves: row.cves || 0,
+    patchAvailable: false,
+    vex: 'not_affected',
+    eol: false,
+    ecosystem: row.ecosystem || 'npm',
+    criticality: row.direct ? 'High' : 'Low',
+    directDependency: Boolean(row.direct),
+    supplier: row.supplier || '',
+    purl: row.purl,
+    compliance: 95,
+  };
 }
 
 export function healthReady(): Promise<{ status: string }> {

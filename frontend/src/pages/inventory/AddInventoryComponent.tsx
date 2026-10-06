@@ -43,8 +43,11 @@ export const AddInventoryComponent: React.FC = () => {
     }
   }, [packageName, componentName, version, ecosystem, purlManuallyEdited]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
 
     const trimmedProject = projectName.trim();
     const trimmedApp = projectApplication.trim();
@@ -95,23 +98,34 @@ export const AddInventoryComponent: React.FC = () => {
     const numVulns = parseInt(vulnerabilities, 10);
     const parsedVulns = isNaN(numVulns) || numVulns < 0 ? 0 : numVulns;
 
-    addComponent({
-      name: trimmedComp,
-      packageName: trimmedPkg,
-      version: trimmedVer,
-      project: trimmedProject,
-      projectApplication: trimmedApp,
-      fieldType,
-      ecosystem,
-      license,
-      supplier: 'Registered Software Component',
-      directDependency,
-      compliance: 95.0,
-      trustScore: 90,
-      risk: riskLevel,
-      cves: parsedVulns,
-      purl: finalPurl,
-    });
+    setSaving(true);
+    try {
+      await addComponent({
+        name: trimmedComp,
+        packageName: trimmedPkg,
+        version: trimmedVer,
+        project: trimmedProject,
+        projectApplication: trimmedApp,
+        fieldType,
+        ecosystem,
+        license,
+        supplier: 'Registered Software Component',
+        directDependency,
+        compliance: 95.0,
+        trustScore: 90,
+        risk: riskLevel,
+        cves: parsedVulns,
+        purl: finalPurl,
+      });
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Could not save component',
+        message: error instanceof Error ? error.message : 'The component was not saved to the database.',
+      });
+      setSaving(false);
+      return;
+    }
 
     addToast({
       type: 'success',
@@ -119,7 +133,6 @@ export const AddInventoryComponent: React.FC = () => {
       message: `Successfully added ${trimmedComp}@${trimmedVer} to ${trimmedProject}.`,
     });
 
-    // Navigate back to the inventory page
     navigate('/software-inventory');
   };
 
@@ -405,10 +418,11 @@ export const AddInventoryComponent: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm shadow-blue-500/20 flex items-center gap-1.5 cursor-pointer transition-all hover:scale-[1.01]"
+              disabled={saving}
+              className="px-4 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm shadow-blue-500/20 flex items-center gap-1.5 cursor-pointer transition-all hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Save & Add Component</span>
+              <span>{saving ? 'Saving…' : 'Save & Add Component'}</span>
             </button>
           </div>
         </form>

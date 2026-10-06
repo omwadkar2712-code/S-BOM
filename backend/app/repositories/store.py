@@ -10,6 +10,32 @@ from typing import Any
 from app.core.db import finish
 
 
+_FIELD_TYPES = {
+    "Library",
+    "Application",
+    "Framework",
+    "Container",
+    "Service",
+    "Operating System",
+    "Device / Firmware",
+    "File",
+}
+_RISKS = {"Safe", "Low", "Medium", "High", "Critical"}
+_ECOSYSTEM_LABELS = {
+    "npm": "npm",
+    "pypi": "PyPI",
+    "maven": "Maven",
+    "go": "Go",
+    "cargo": "Cargo",
+    "nuget": "NuGet",
+    "rubygems": "RubyGems",
+    "packagist": "Packagist",
+    "composer": "Packagist",
+}
+_MANUAL_SCANNER = "manual"
+_MAX_INVENTORY_BATCH = 5000
+
+
 def _package_key(comp: dict[str, Any]) -> tuple[str, str, str]:
     return (
         str(comp.get("name") or "").strip().lower(),
@@ -579,3 +605,307 @@ class BomRepo:
             (app_id, limit),
         ).fetchall()
         return [snap for row in rows if (snap := self.get_snapshot(row["id"]))]
+
+    def list_inventory_components(
+        self,
+        organization_id: str,
+        *,
+        limit: int = 200,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        page_size = min(max(int(limit or 200), 1), 500)
+        params: list[Any] = [organization_id, "manual"]
+        cursor_sql = ""
+        if cursor:
+            created_at, component_id = _decode_cursor(cursor)
+            cursor_sql = "AND (c.created_at, c.id) < (?, ?)"
+            params.extend([created_at, component_id])
+        params.append(page_size + 1)
+        rows = self.db.execute(
+            f"""SELECT c.id, c.name, c.version, c.ecosystem, c.purl, c.license, c.supplier,
+                      c.direct_dependency, c.raw, c.package_name, c.field_type, c.risk, c.cve_count,
+                      c.created_at, p.name AS project_name, a.name AS application_name
+               FROM bom_components c
+               JOIN bom_snapshots s ON s.id = c.bom_snapshot_id
+               JOIN projects p ON p.id = s.project_id
+               JOIN applications a ON a.id = s.application_id
+               WHERE c.organization_id = ? AND c.source_manifest = ?
+               {cursor_sql}
+               ORDER BY c.created_at DESC, c.id DESC
+               LIMIT ?""",
+            params,
+        ).fetchall()
+        page = rows[:page_size]
+        next_cursor = None
+        if len(rows) > page_size and page:
+            last = page[-1]
+            next_cursor = _encode_cursor(last["created_at"], last["id"])
+        return {"items": [_inventory_component(row) for row in page], "next_cursor": next_cursor}
+
+    def add_inventory_components(self, organization_id: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not isinstance(items, list) or not items:
+            raise ValueError("components are required")
+        if len(items) > _MAX_INVENTORY_BATCH:
+            raise ValueError(f"at most {_MAX_INVENTORY_BATCH} components can be saved at once")
+        prepared = [_prepare_inventory_component(item) for item in items]
+        now = iso(utcnow()) or ""
+        created: list[dict[str, Any]] = []
+        with self.db.lock:
+            if self.db.in_transaction:
+                self.db.rollback()
+            self.db.begin()
+            try:
+                self.db.execute(
+                    "INSERT INTO organizations (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING",
+                    (organization_id, organization_id),
+                )
+                project_ids = self._upsert_projects(organization_id, list(dict.fromkeys(item["project"] for item in prepared)))
+                applications = list(dict.fromkeys((item["project"], item["project_application"]) for item in prepared))
+                application_ids = self._upsert_applications(organization_id, applications, project_ids)
+                snapshot_ids = self._upsert_manual_snapshots(organization_id, applications, project_ids, application_ids, now)
+                component_rows = []
+                for item in prepared:
+                    component_id = str(uuid.uuid4())
+                    snapshot_id = snapshot_ids[(project_ids[item["project"]], application_ids[(project_ids[item["project"]], item["project_application"])])]
+                    raw = {
+                        "package_name": item["package_name"],
+                        "field_type": item["field_type"],
+                        "risk": item["risk"],
+                        "cve_count": item["cves"],
+                        "ecosystem": item["ecosystem_label"],
+                    }
+                    component_rows.append(
+                        (
+                            component_id, snapshot_id, organization_id, item["name"], item["package_name"],
+                            item["version"], item["ecosystem_key"], item["purl"], item["license"], item["supplier"],
+                            item["direct"], item["field_type"], item["risk"], item["cves"], "manual",
+                            json.dumps(raw), now,
+                        )
+                    )
+                    created.append(
+                        {
+                            "id": component_id,
+                            "name": item["name"],
+                            "package_name": item["package_name"],
+                            "version": item["version"],
+                            "project": item["project"],
+                            "project_application": item["project_application"],
+                            "field_type": item["field_type"],
+                            "license": item["license"],
+                            "cves": item["cves"],
+                            "purl": item["purl"],
+                            "risk": item["risk"],
+                            "ecosystem": item["ecosystem_label"],
+                            "direct": item["direct"],
+                            "supplier": item["supplier"],
+                        }
+                    )
+                self.db.executemany(
+                    """INSERT INTO bom_components (id, bom_snapshot_id, organization_id, name, package_name,
+                       version, ecosystem, purl, license, supplier, direct_dependency, field_type, risk,
+                       cve_count, source_manifest, raw, created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    component_rows,
+                )
+                self.db.commit()
+            except Exception:
+                if self.db.in_transaction:
+                    self.db.rollback()
+                raise
+        return created
+
+    def _upsert_projects(self, organization_id: str, names: list[str]) -> dict[str, str]:
+        _insert_ignore(
+            self.db,
+            "INSERT INTO projects (id, organization_id, name)",
+            "ON CONFLICT (organization_id, name) DO NOTHING",
+            [(str(uuid.uuid4()), organization_id, name) for name in names],
+        )
+        rows = self.db.execute(
+            "SELECT id, name FROM projects WHERE organization_id = ? AND name = ANY(?)",
+            (organization_id, names),
+        ).fetchall()
+        return {row["name"]: row["id"] for row in rows}
+
+    def _upsert_applications(
+        self,
+        organization_id: str,
+        applications: list[tuple[str, str]],
+        project_ids: dict[str, str],
+    ) -> dict[tuple[str, str], str]:
+        rows = [
+            (str(uuid.uuid4()), organization_id, project_ids[project], name)
+            for project, name in applications
+        ]
+        _insert_ignore(
+            self.db,
+            "INSERT INTO applications (id, organization_id, project_id, name)",
+            "ON CONFLICT (organization_id, project_id, name) DO NOTHING",
+            rows,
+        )
+        found = self.db.execute(
+            """SELECT id, project_id, name FROM applications
+               WHERE organization_id = ? AND project_id = ANY(?)""",
+            (organization_id, list({row[2] for row in rows})),
+        ).fetchall()
+        wanted = {(project_ids[project], name) for project, name in applications}
+        return {(row["project_id"], row["name"]): row["id"] for row in found if (row["project_id"], row["name"]) in wanted}
+
+    def _upsert_manual_snapshots(
+        self,
+        organization_id: str,
+        applications: list[tuple[str, str]],
+        project_ids: dict[str, str],
+        application_ids: dict[tuple[str, str], str],
+        now: str,
+    ) -> dict[tuple[str, str], str]:
+        rows = []
+        for project, name in applications:
+            project_id = project_ids[project]
+            application_id = application_ids[(project_id, name)]
+            rows.append(
+                (
+                    str(uuid.uuid4()), organization_id, project_id, application_id, "", "SBOM", "", "MANUAL",
+                    "", "", "", "", "", "", _MANUAL_SCANNER, "1", "", now, "{}",
+                )
+            )
+        _insert_ignore(
+            self.db,
+            """INSERT INTO bom_snapshots (id, organization_id, project_id, application_id,
+               scan_id, bom_type, application_version, version_strategy,
+               repository_url, repository_branch, commit_sha, commit_author, commit_email,
+               commit_message, scanner_name, scanner_version, bom_format_version,
+               generated_at, raw_metadata)""",
+            "ON CONFLICT (organization_id, project_id, application_id) WHERE scanner_name = 'manual' DO NOTHING",
+            rows,
+        )
+        project_id_list = list({project_ids[project] for project, _ in applications})
+        found = self.db.execute(
+            """SELECT id, project_id, application_id FROM bom_snapshots
+               WHERE organization_id = ? AND scanner_name = ? AND project_id = ANY(?)""",
+            (organization_id, _MANUAL_SCANNER, project_id_list),
+        ).fetchall()
+        return {(row["project_id"], row["application_id"]): row["id"] for row in found}
+
+
+def _prepare_inventory_component(item: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError("each component must be an object")
+    project = _clip(item.get("project") or item.get("project_name"))
+    application = _clip(item.get("project_application") or item.get("projectApplication"))
+    name = _clip(item.get("name"))
+    version = _clip(item.get("version"))
+    if not project or not application or not name or not version:
+        raise ValueError("project, project application, component name, and version are required")
+    package_name = _clip(item.get("package_name") or item.get("packageName")) or name
+    field_type = _clip(item.get("field_type") or item.get("fieldType")) or "Library"
+    if field_type not in _FIELD_TYPES:
+        raise ValueError("field type is not supported")
+    risk = _clip(item.get("risk")) or "Safe"
+    if risk not in _RISKS:
+        raise ValueError("risk level is not supported")
+    ecosystem_key, ecosystem_label = _ecosystem(item.get("ecosystem"))
+    license_name = _clip(item.get("license"), 200) or "Unknown"
+    purl = _clip(item.get("purl"), 1000) or f"pkg:{ecosystem_key}/{package_name}@{version}"
+    supplier = _clip(item.get("supplier"), 300) or "Registered Software Component"
+    cves = _cve_count(item.get("cves"))
+    direct = item.get("direct_dependency")
+    if direct is None:
+        direct = item.get("direct")
+    if direct is None:
+        direct = True
+    return {
+        "project": project,
+        "project_application": application,
+        "name": name,
+        "package_name": package_name,
+        "version": version,
+        "field_type": field_type,
+        "license": license_name,
+        "cves": cves,
+        "purl": purl,
+        "risk": risk,
+        "ecosystem_key": ecosystem_key,
+        "ecosystem_label": ecosystem_label,
+        "direct": bool(direct),
+        "supplier": supplier,
+    }
+
+
+def _insert_ignore(db, sql_head: str, conflict: str, rows: list[tuple], chunk: int = 400) -> None:
+    if not rows:
+        return
+    width = len(rows[0])
+    for start in range(0, len(rows), chunk):
+        part = rows[start:start + chunk]
+        placeholders = ",".join("(" + ",".join("?" for _ in range(width)) + ")" for _ in part)
+        params = [value for row in part for value in row]
+        db.execute(f"{sql_head} VALUES {placeholders} {conflict}", params)
+
+
+def _encode_cursor(created_at: str, component_id: str) -> str:
+    return f"{created_at}|{component_id}"
+
+
+def _decode_cursor(cursor: str) -> tuple[str, str]:
+    created_at, separator, component_id = str(cursor or "").partition("|")
+    if not separator or not created_at or not component_id:
+        raise ValueError("cursor is invalid")
+    return created_at, component_id
+
+
+def _inventory_component(row) -> dict[str, Any]:
+    raw = json.loads(row["raw"]) if row["raw"] else {}
+    if not isinstance(raw, dict):
+        raw = {}
+    ecosystem = raw.get("ecosystem") or _ECOSYSTEM_LABELS.get(str(row["ecosystem"] or "").lower(), "npm")
+    try:
+        cves = int(row["cve_count"] or 0)
+    except (TypeError, ValueError, KeyError):
+        cves = 0
+    if cves == 0:
+        try:
+            cves = int(raw.get("cve_count") or 0)
+        except (TypeError, ValueError):
+            cves = 0
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "package_name": row["package_name"] or raw.get("package_name") or row["name"],
+        "version": row["version"],
+        "project": row["project_name"],
+        "project_application": row["application_name"],
+        "field_type": row["field_type"] or raw.get("field_type") or "Library",
+        "license": row["license"] or "Unknown",
+        "cves": cves,
+        "purl": row["purl"] or "",
+        "risk": row["risk"] or raw.get("risk") or "Safe",
+        "ecosystem": ecosystem,
+        "direct": bool(row["direct_dependency"]),
+        "supplier": row["supplier"] or "",
+    }
+
+
+def _ecosystem(value: Any) -> tuple[str, str]:
+    key = str(value or "").strip().lower()
+    if key in _ECOSYSTEM_LABELS:
+        label = _ECOSYSTEM_LABELS[key]
+        stored = "packagist" if key == "composer" else key
+        return stored, label
+    return "npm", "npm"
+
+
+def _cve_count(value: Any) -> int:
+    if value is None or value == "":
+        return 0
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("vulnerabilities must be a number") from None
+    if count < 0:
+        raise ValueError("vulnerabilities cannot be negative")
+    return count
+
+
+def _clip(value: Any, limit: int = 500) -> str:
+    return str(value or "").strip()[:limit]

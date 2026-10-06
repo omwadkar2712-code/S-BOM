@@ -13,7 +13,7 @@ from app.core.config import Config
 
 log = logging.getLogger("bom.db")
 
-_SCHEMA = Path(__file__).resolve().parents[2] / "migrations" / "001_initial.up.sql"
+_MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
 
 # Connection-level failures that warrant a reconnect attempt.
 _CONN_MARKERS = (
@@ -102,6 +102,13 @@ class Database:
         columns = [item[0] for item in cursor.description]
         rows = [Row(tuple(_cell(value) for value in record), columns) for record in cursor.fetchall()]
         return Result(rows)
+
+    def executemany(self, sql: str, rows: list[tuple]) -> None:
+        if not rows:
+            return
+        with self.lock:
+            with self.raw.cursor() as cursor:
+                cursor.executemany(sql.replace("?", "%s"), rows)
 
     def script(self, sql: str) -> None:
         with self.lock:
@@ -211,7 +218,8 @@ def finish(db: Database) -> None:
 
 
 def migrate(db: Database) -> None:
-    db.script(_SCHEMA.read_text(encoding="utf-8"))
+    for path in sorted(_MIGRATIONS.glob("*.up.sql")):
+        db.script(path.read_text(encoding="utf-8"))
     finish(db)
 
 

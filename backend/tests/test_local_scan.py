@@ -64,6 +64,16 @@ def test_local_package_json_scan(tmp_path):
     assert exported.status_code == 200
     assert b"left-pad" in exported.content
 
+    spdx_exp = client.get(f"/api/v1/scans/{scan_id}/export?format=spdx-json", headers={"X-Organization-Id": "default"}, follow_redirects=True)
+    assert spdx_exp.status_code == 200
+    assert "SPDX-2.3" in spdx_exp.text
+    assert "left-pad" in spdx_exp.text
+
+    cdx_exp = client.get(f"/api/v1/scans/{scan_id}/export?format=cyclonedx-json", headers={"X-Organization-Id": "default"}, follow_redirects=True)
+    assert cdx_exp.status_code == 200
+    assert "CycloneDX" in cdx_exp.text
+    assert "left-pad" in cdx_exp.text
+
 
 def _component_versions(name: str) -> list[str]:
     conn = psycopg.connect(TEST_DB, autocommit=True)

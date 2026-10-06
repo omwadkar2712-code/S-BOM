@@ -18,7 +18,21 @@ EXPORTERS = {
 }
 
 
+def normalize_format(fmt: str) -> str:
+    cleaned = (fmt or "").lower().strip()
+    if cleaned in ("spdx", "spdx-json", "spdx_json"):
+        return "spdx-json"
+    if cleaned in ("cyclonedx", "cyclonedx-json", "cyclonedx_json", "cdx", "cdx-json"):
+        return "cyclonedx-json"
+    if cleaned in ("csv", "text/csv"):
+        return "csv"
+    if cleaned in ("xlsx", "excel"):
+        return "xlsx"
+    return cleaned
+
+
 def export_snapshot(fmt: str, snap: dict) -> tuple[bytes, str]:
+    fmt = normalize_format(fmt)
     if fmt not in EXPORTERS:
         raise KeyError(fmt)
     if fmt == "cyclonedx-json":
@@ -43,10 +57,11 @@ def _cyclonedx(snap: dict) -> bytes:
     components = []
     by_id = {}
     for comp in snap.get("components") or []:
-        by_id[comp["id"]] = comp.get("purl") or ""
+        comp_id = str(comp.get("id") or comp.get("purl") or comp.get("name") or "")
+        by_id[comp_id] = comp.get("purl") or ""
         item = {
             "type": "library",
-            "bom-ref": comp.get("purl") or "",
+            "bom-ref": comp.get("purl") or comp_id,
             "name": comp.get("name") or "",
             "version": comp.get("version") or "",
         }
@@ -65,11 +80,12 @@ def _cyclonedx(snap: dict) -> bytes:
         to = by_id.get(dep.get("to_component_id"))
         if frm and to:
             graph.setdefault(frm, []).append(to)
+    snap_id = str(snap.get("id") or "00000000-0000-0000-0000-000000000000")
     doc = {
         "bomFormat": "CycloneDX",
         "specVersion": "1.5",
         "version": 1,
-        "serialNumber": "urn:uuid:" + snap["id"],
+        "serialNumber": "urn:uuid:" + snap_id,
         "metadata": {
             "timestamp": _stamp(snap.get("generated_at")),
             "tools": [{"vendor": "bom-engine", "name": snap.get("scanner_name") or "", "version": snap.get("scanner_version") or ""}],
@@ -114,7 +130,8 @@ def _spdx(snap: dict) -> bytes:
     by_id = {}
     for i, comp in enumerate(snap.get("components") or []):
         sid = _spdx_id(comp.get("name") or "", comp.get("version") or "", i)
-        by_id[comp["id"]] = sid
+        comp_id = str(comp.get("id") or str(i))
+        by_id[comp_id] = sid
         packages.append(
             {
                 "SPDXID": sid,
@@ -136,12 +153,13 @@ def _spdx(snap: dict) -> bytes:
         to = by_id.get(dep.get("to_component_id"))
         if frm and to:
             rels.append({"spdxElementId": frm, "relatedSpdxElement": to, "relationshipType": "DEPENDS_ON"})
+    snap_id = str(snap.get("id") or "00000000-0000-0000-0000-000000000000")
     doc = {
         "spdxVersion": "SPDX-2.3",
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": _or(snap.get("application_id"), "sbom"),
-        "documentNamespace": "urn:uuid:" + snap["id"],
+        "documentNamespace": "urn:uuid:" + snap_id,
         "creationInfo": {
             "created": _stamp(snap.get("generated_at")),
             "creators": [f"Tool: {snap.get('scanner_name') or ''}@{snap.get('scanner_version') or ''}"],

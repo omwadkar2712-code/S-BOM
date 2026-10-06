@@ -774,28 +774,34 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const exportSBOM = (format: 'spdx' | 'cyclonedx' | 'csv' | 'json', scanId?: string) => {
     const exportId = scanId || latestScanId;
+    const targetScan = exportId ? scansHistory.find(s => s.id === exportId) : null;
+    const projName = targetScan?.targetProject || 'sbom-project';
+    const cleanProj = projName.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    const ext = format === 'spdx' ? 'spdx.json' : format === 'cyclonedx' ? 'cdx.json' : format === 'csv' ? 'csv' : 'json';
+    const downloadName = `${cleanProj}-${exportId || Date.now()}.${ext}`;
 
     const downloadClientFile = () => {
       let content = '';
-      const targetScan = scansHistory.find(s => s.id === exportId);
-      const projName = targetScan?.targetProject || 'sbom-project';
-      let filename = `${projName.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}-${exportId || Date.now()}`;
       let mimeType = 'text/plain';
 
-      const scanComponents = targetScan
-        ? components.filter(c => c.project === targetScan.targetProject)
-        : components;
+      let scanComponents: typeof components = [];
+      if (targetScan?.isBulkAggregate && targetScan.bulkId) {
+        const childScans = scansHistory.filter(s => s.bulkId === targetScan.bulkId && !s.isBulkAggregate);
+        const childProjects = new Set([targetScan.targetProject, ...childScans.map(s => s.targetProject)]);
+        scanComponents = components.filter(c => childProjects.has(c.project));
+      } else if (targetScan) {
+        scanComponents = components.filter(c => c.project === targetScan.targetProject);
+      }
       const exportComponents = scanComponents.length > 0 ? scanComponents : components;
 
       if (format === 'spdx') {
-        filename += '.spdx.json';
         mimeType = 'application/json';
         content = JSON.stringify({
           spdxVersion: 'SPDX-2.3',
           dataLicense: 'CC0-1.0',
           SPDXID: 'SPDXRef-DOCUMENT',
           name: `SPDX-${projName}`,
-          documentNamespace: `https://spdx.org/spdxdocs/${exportId || 'export'}-${Date.now()}`,
+          documentNamespace: `https://spdx.org/spdxdocs/${cleanProj}-${exportId || 'export'}-${Date.now()}`,
           creationInfo: {
             created: new Date().toISOString(),
             creators: [
@@ -820,7 +826,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           })),
         }, null, 2);
       } else if (format === 'cyclonedx') {
-        filename += '.cdx.json';
         mimeType = 'application/json';
         content = JSON.stringify({
           bomFormat: 'CycloneDX',
@@ -845,10 +850,9 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           })),
         }, null, 2);
       } else if (format === 'csv') {
-        filename += '.csv';
         mimeType = 'text/csv';
         const headers = ['NAME', 'VERSION', 'PROJECT', 'COMPLIANCE', 'LICENSE', 'TRUST', 'RISK', 'CVES', 'ECOSYSTEM'];
-        const rows = components.map(c => [
+        const rows = exportComponents.map(c => [
           `"${c.name}"`,
           `"${c.version}"`,
           `"${c.project}"`,
@@ -861,16 +865,15 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ].join(','));
         content = [headers.join(','), ...rows].join('\n');
       } else {
-        filename += '.json';
         mimeType = 'application/json';
-        content = JSON.stringify({ components, vulnerabilities, projects }, null, 2);
+        content = JSON.stringify({ components: exportComponents, vulnerabilities, projects }, null, 2);
       }
 
       const blob = new Blob([content], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = filename;
+      link.download = downloadName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -878,13 +881,12 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       addToast({
         type: 'success',
         title: 'Export Successful',
-        message: `Downloaded ${filename} (${format.toUpperCase()} format).`,
+        message: `Downloaded ${downloadName} (${format.toUpperCase()} format).`,
       });
     };
 
     if (exportId && format !== 'json') {
       const fmt = format === 'spdx' ? 'spdx-json' : format === 'cyclonedx' ? 'cyclonedx-json' : 'csv';
-      const downloadName = `sbom-${exportId}.${format === 'csv' ? 'csv' : 'json'}`;
       void (async () => {
         try {
           const res = await fetch(api.exportUrl(exportId, fmt), {
@@ -902,7 +904,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           link.click();
           document.body.removeChild(link);
           URL.revokeObjectURL(url);
-          addToast({ type: 'success', title: 'Export started', message: `${downloadName} downloaded.` });
+          addToast({
+            type: 'success',
+            title: 'Export Successful',
+            message: `Downloaded ${downloadName} (${format.toUpperCase()} format).`,
+          });
         } catch {
           downloadClientFile();
         }

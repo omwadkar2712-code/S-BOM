@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from app.core.config import Config, load
 from app.credentials.service import Audit, CredentialStore, Credentials
 from app.core.db import connect, ensure_alive, migrate
-from app.export.formats import EXPORTERS, export_snapshot
+from app.export.formats import EXPORTERS, export_snapshot, normalize_format
 from app.core.metrics import METRICS
 from app.scans.orchestrator import CancelError, Orchestrator, RescanError
 from app.projects.dashboard import list_projects
@@ -379,12 +379,61 @@ def build(cfg: Config | None = None) -> FastAPI:
         return _envelope((snap.get("raw_metadata") or {}).get("vulnerability_matches"), rid(request))
 
     @app.get("/api/v1/scans/{scan_id}/export")
-    def scan_export(scan_id: str, request: Request):
+    def scan_export(scan_id: str, request: Request, format: str = "cyclonedx-json"):
         scan = _owned(scans, scan_id, _org(request))
-        if scan is None or not scan.get("snapshot_id"):
-            return _error("SCAN_NOT_FOUND", "not found", rid(request), 404)
-        query = request.url.query
-        return RedirectResponse(f"/api/v1/boms/{scan['snapshot_id']}/export?{query}", status_code=302)
+        if scan is not None and scan.get("snapshot_id"):
+            query = request.url.query
+            return RedirectResponse(f"/api/v1/boms/{scan['snapshot_id']}/export?{query}", status_code=302)
+
+        # Check if scan_id is a bulk scan
+        bulk = _get_bulk(db, scan_id, _org(request))
+        if bulk is not None:
+            format_name = request.query_params.get("format", format)
+            child_rows = db.execute(
+                """SELECT s.snapshot_id, s.project_id, s.application_name, s.application_version
+                   FROM bulk_scan_items bsi
+                   JOIN scans s ON s.id = bsi.scan_id
+                   WHERE bsi.bulk_scan_id = ? AND s.snapshot_id IS NOT NULL AND s.status = 'COMPLETED'""",
+                (scan_id,),
+            ).fetchall()
+            snapshots = [boms.get_snapshot(r[0]) for r in child_rows if r[0]]
+            snapshots = [s for s in snapshots if s is not None]
+            if not snapshots:
+                return _error("NO_SNAPSHOTS", "no completed scans found in this bulk scan", rid(request), 404)
+
+            composite = {
+                "id": scan_id,
+                "organization_id": _org(request),
+                "project_id": bulk.get("project_id") or "Bulk Scan",
+                "application_id": bulk.get("project_id") or "Bulk Scan",
+                "application_version": f"{len(snapshots)} items",
+                "scanner_name": "bom-engine",
+                "scanner_version": "sbom-engine-1.0.0",
+                "generated_at": bulk.get("completed_at") or bulk.get("created_at") or iso(utcnow()),
+                "components": [],
+                "dependencies": [],
+            }
+            seen_comps = set()
+            for snap in snapshots:
+                for comp in snap.get("components") or []:
+                    key = (comp.get("name"), comp.get("version"), comp.get("purl"))
+                    if key not in seen_comps:
+                        seen_comps.add(key)
+                        composite["components"].append(comp)
+                for dep in snap.get("dependencies") or []:
+                    composite["dependencies"].append(dep)
+            try:
+                payload, content_type = export_snapshot(format_name, composite)
+            except KeyError:
+                return _error("UNSUPPORTED_FORMAT", "unsupported format", rid(request), 400)
+
+            clean_proj = (bulk.get("project_id") or "bulk-scan").lower().replace(" ", "-")
+            normalized = normalize_format(format_name)
+            ext = "spdx.json" if normalized == "spdx-json" else "cdx.json" if normalized == "cyclonedx-json" else "csv" if normalized == "csv" else "xlsx"
+            headers = {"Content-Disposition": f'attachment; filename="{clean_proj}-{scan_id}.{ext}"'}
+            return Response(payload, media_type=content_type, headers=headers)
+
+        return _error("SCAN_NOT_FOUND", "not found", rid(request), 404)
 
     @app.get("/api/v1/boms/{bom_id}")
     def get_bom(bom_id: str, request: Request):
@@ -402,7 +451,12 @@ def build(cfg: Config | None = None) -> FastAPI:
             payload, content_type = export_snapshot(format, snap)
         except KeyError:
             return _error("UNSUPPORTED_FORMAT", "unsupported format", rid(request), 400)
-        return Response(payload, media_type=content_type)
+
+        proj = (snap.get("project_id") or snap.get("application_id") or bom_id).lower().replace(" ", "-")
+        normalized = normalize_format(format)
+        ext = "spdx.json" if normalized == "spdx-json" else "cdx.json" if normalized == "cyclonedx-json" else "csv" if normalized == "csv" else "xlsx"
+        headers = {"Content-Disposition": f'attachment; filename="{proj}-{bom_id}.{ext}"'}
+        return Response(payload, media_type=content_type, headers=headers)
 
     @app.get("/api/v1/applications/{application_id}/boms")
     def app_boms(application_id: str, request: Request):

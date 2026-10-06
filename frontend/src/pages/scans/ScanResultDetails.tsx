@@ -271,7 +271,7 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
               {rescanning ? 'Queuing' : 'Rescan'}
             </button>
           )}
-          {job.status === 'completed' && !job.isBulkAggregate && (
+          {job.status === 'completed' && (
             <>
               <button type="button" onClick={() => onExport('spdx', job.id)} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">
                 <Download className="w-3.5 h-3.5" /> SPDX

@@ -11,14 +11,18 @@ import {
 import { useAppState } from '../../context/AppStateContext';
 import { LicenseType, Severity, Ecosystem } from '../../types';
 import { UploadInventoryModal } from './UploadInventoryModal';
+import { ProjectApplicationSelect } from '../../components/common/ProjectApplicationSelect';
+import type { CatalogRecord } from '../../api/client';
 
 export const AddInventoryComponent: React.FC = () => {
   const navigate = useNavigate();
-  const { addToast, projects, addComponent } = useAppState();
+  const { addToast, addComponent } = useAppState();
 
   // Form State
-  const [projectName, setProjectName] = useState('');
-  const [projectApplication, setProjectApplication] = useState('');
+  const [selectedProject, setSelectedProject] = useState<CatalogRecord | null>(null);
+  const [selectedApplication, setSelectedApplication] = useState<CatalogRecord | null>(null);
+  const projectName = selectedProject?.name || '';
+  const projectApplication = selectedApplication?.name || '';
   const [componentName, setComponentName] = useState('');
   const [packageName, setPackageName] = useState('');
   const [version, setVersion] = useState('');
@@ -62,7 +66,7 @@ export const AddInventoryComponent: React.FC = () => {
     const trimmedFile = fileName.trim() || 'package.json';
     const trimmedCreatedBy = createdBy.trim() || 'SecOps Admin';
 
-    if (!trimmedProject) {
+    if (!selectedProject?.id) {
       addToast({
         type: 'warning',
         title: 'Validation Error',
@@ -71,7 +75,7 @@ export const AddInventoryComponent: React.FC = () => {
       return;
     }
 
-    if (!trimmedApp) {
+    if (!selectedApplication?.id) {
       addToast({
         type: 'warning',
         title: 'Validation Error',
@@ -109,7 +113,9 @@ export const AddInventoryComponent: React.FC = () => {
         packageName: trimmedPkg,
         version: trimmedVer,
         project: trimmedProject,
+        projectId: selectedProject.id,
         projectApplication: trimmedApp,
+        applicationId: selectedApplication.id,
         fileName: trimmedFile,
         fieldType: 'Library',
         ecosystem,
@@ -187,41 +193,17 @@ export const AddInventoryComponent: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-3 pt-0.5">
-              {/* Project Name */}
-              <div>
-                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight mb-1">
-                  Project Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  list="project-names-list"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="e.g. payments-api"
-                  className="w-full px-2.5 py-1.5 text-xs bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-gray-850 transition-colors shadow-2xs"
-                />
-                <datalist id="project-names-list">
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.name} />
-                  ))}
-                </datalist>
-              </div>
-
-              {/* Project Application */}
-              <div>
-                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-tight mb-1">
-                  Project Application <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={projectApplication}
-                  onChange={(e) => setProjectApplication(e.target.value)}
-                  placeholder="e.g. backend-api, auth-service"
-                  className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-gray-850 transition-colors shadow-2xs"
-                />
-              </div>
+              <ProjectApplicationSelect
+                variant="form"
+                required
+                projectLabel="Project Name"
+                applicationLabel="Project Application"
+                value={{ project: selectedProject, application: selectedApplication }}
+                onChange={({ project, application }) => {
+                  setSelectedProject(project);
+                  setSelectedApplication(application);
+                }}
+              />
 
               {/* Component Name */}
               <div>

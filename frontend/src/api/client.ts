@@ -22,7 +22,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  const res = await fetch(`${BASE}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...init, headers });
+  } catch (error) {
+    if (init.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+      throw error;
+    }
+    throw error;
+  }
   const text = await res.text();
   let body: (Envelope<T> & { detail?: string }) | null = null;
   if (text) {
@@ -123,6 +131,8 @@ export interface ApiInventoryComponent {
 export interface InventoryComponentInput {
   project: string;
   project_application: string;
+  project_id?: string;
+  application_id?: string;
   name: string;
   package_name?: string;
   version: string;
@@ -134,6 +144,56 @@ export interface InventoryComponentInput {
   purl?: string;
   direct_dependency?: boolean;
   supplier?: string;
+}
+
+export interface CatalogRecord {
+  id: string;
+  name: string;
+  project_id?: string;
+}
+
+export interface CatalogPage {
+  items: CatalogRecord[];
+  next_cursor: string | null;
+}
+
+export function listCatalogProjects(params?: { q?: string; limit?: number; cursor?: string; signal?: AbortSignal }): Promise<CatalogPage> {
+  const query = new URLSearchParams({ limit: String(params?.limit || 50) });
+  if (params?.q) query.set('q', params.q);
+  if (params?.cursor) query.set('cursor', params.cursor);
+  return request(`/api/v1/catalog/projects?${query.toString()}`, { signal: params?.signal });
+}
+
+export function listCatalogApplications(
+  projectId: string,
+  params?: { q?: string; limit?: number; cursor?: string; signal?: AbortSignal },
+): Promise<CatalogPage> {
+  const query = new URLSearchParams({ limit: String(params?.limit || 50) });
+  if (params?.q) query.set('q', params.q);
+  if (params?.cursor) query.set('cursor', params.cursor);
+  return request(`/api/v1/catalog/projects/${encodeURIComponent(projectId)}/applications-services?${query.toString()}`, {
+    signal: params?.signal,
+  });
+}
+
+export function createCatalogProject(input: {
+  name: string;
+  applications?: string[] | { name: string }[];
+}): Promise<{ id: string; name: string; applications: CatalogRecord[] }> {
+  return request('/api/v1/catalog/projects', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: input.name,
+      applications: input.applications || [],
+    }),
+  });
+}
+
+export function createCatalogApplication(projectId: string, name: string): Promise<CatalogRecord> {
+  return request(`/api/v1/catalog/projects/${encodeURIComponent(projectId)}/applications-services`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
 }
 
 interface InventoryPage {
@@ -263,6 +323,7 @@ export function createLocalScan(
   project: string,
   application: string,
   version: string,
+  ids?: { projectId?: string; applicationId?: string },
 ): Promise<{ scan_id: string; status?: string; stage?: string }> {
   const body = new FormData();
   if (source.folderFiles && source.folderFiles.length > 0) {
@@ -280,6 +341,8 @@ export function createLocalScan(
   body.append('project_name', project);
   body.append('application_name', application);
   body.append('version', version || 'UNKNOWN');
+  if (ids?.projectId) body.append('project_id', ids.projectId);
+  if (ids?.applicationId) body.append('application_id', ids.applicationId);
   return request('/api/v1/scans/local', { method: 'POST', body });
 }
 
@@ -290,6 +353,8 @@ export function createGitHubScan(input: {
   version: string;
   branch: string;
   credentialId?: string;
+  projectId?: string;
+  applicationId?: string;
 }): Promise<{ scan_id: string; status?: string; stage?: string }> {
   return request('/api/v1/scans/github', {
     method: 'POST',
@@ -297,6 +362,8 @@ export function createGitHubScan(input: {
       repository_url: input.repositoryUrl,
       project_name: input.project,
       application_name: input.application,
+      project_id: input.projectId || '',
+      application_id: input.applicationId || '',
       version: input.version || 'UNKNOWN',
       branch: input.branch,
       authentication: input.credentialId ? { type: 'GITHUB_FINE_GRAINED_PAT', credential_id: input.credentialId } : undefined,

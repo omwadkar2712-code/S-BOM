@@ -4,7 +4,7 @@ import { X, FolderPlus, GitBranch, Layers, ShieldCheck } from 'lucide-react';
 import { Severity } from '../../types';
 
 export const AddProjectModal: React.FC = () => {
-  const { addProjectModalOpen, setAddProjectModalOpen, addProject } = useAppState();
+  const { addProjectModalOpen, setAddProjectModalOpen, addProject, addToast } = useAppState();
   const [name, setName] = useState('');
   const [component, setComponent] = useState('');
   const [version, setVersion] = useState('v1.0.0');
@@ -15,26 +15,35 @@ export const AddProjectModal: React.FC = () => {
 
   if (!addProjectModalOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    addProject({
-      name: name.trim(),
-      component: component.trim() || `${name.trim()}-svc`,
-      version: version.trim(),
-      repoUrl: repoUrl.trim() || `https://github.com/talakunchi/${name.trim()}`,
-      branch: branch.trim(),
-      tags: tags.split(',').map(t => t.trim()).filter(Boolean),
-      riskLevel,
-      riskScore: riskLevel === 'Critical' ? 8.5 : riskLevel === 'High' ? 6.5 : riskLevel === 'Medium' ? 4.5 : 2.0,
-      complianceScore: 88.0,
-      componentsCount: 18,
-      criticalCount: riskLevel === 'Critical' ? 1 : 0,
-      highCount: riskLevel === 'High' ? 2 : 0,
-      mediumCount: 2,
-      lowCount: 5,
-    });
+    try {
+      await addProject({
+        name: name.trim(),
+        component: component.trim() || `${name.trim()}-svc`,
+        version: version.trim(),
+        repoUrl: repoUrl.trim() || `https://github.com/talakunchi/${name.trim()}`,
+        branch: branch.trim(),
+        tags: tags.split(',').map(t => t.trim()).filter(Boolean),
+        riskLevel,
+        riskScore: riskLevel === 'Critical' ? 8.5 : riskLevel === 'High' ? 6.5 : riskLevel === 'Medium' ? 4.5 : 2.0,
+        complianceScore: 88.0,
+        componentsCount: 18,
+        criticalCount: riskLevel === 'Critical' ? 1 : 0,
+        highCount: riskLevel === 'High' ? 2 : 0,
+        mediumCount: 2,
+        lowCount: 5,
+      });
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Could not register project',
+        message: error instanceof Error ? error.message : 'The project was not saved to the database.',
+      });
+      return;
+    }
 
     setName('');
     setComponent('');

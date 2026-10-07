@@ -134,6 +134,8 @@ interface AppStateContextType {
   startScan: (params: {
     projectName: string;
     appService: string;
+    projectId?: string;
+    applicationId?: string;
     releaseTag?: string;
     scanType: 'Local Source' | 'Remote Git' | 'Batch Multi-Project' | 'Bulk Scan';
     source: string;
@@ -147,7 +149,7 @@ interface AppStateContextType {
   rescanScan: (job: ScanJob) => Promise<void>;
   cancelScan: (job: ScanJob) => Promise<void>;
   
-  addProject: (newProj: Partial<Project>) => void;
+  addProject: (newProj: Partial<Project>) => Promise<void>;
   addComponent: (newComp: Partial<SBOMComponent>) => Promise<void>;
   addComponents: (items: Partial<SBOMComponent>[]) => Promise<void>;
   updateTicketStatus: (id: string, status: RemediationTicket['status']) => void;
@@ -340,6 +342,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const startScan = async (params: {
     projectName: string;
     appService: string;
+    projectId?: string;
+    applicationId?: string;
     releaseTag?: string;
     scanType: 'Local Source' | 'Remote Git' | 'Batch Multi-Project' | 'Bulk Scan';
     source: string;
@@ -363,6 +367,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         params.projectName,
         params.appService,
         params.releaseTag || 'UNKNOWN',
+        { projectId: params.projectId, applicationId: params.applicationId },
       );
       createdId = created.scan_id;
       createdStatus = created.status || createdStatus;
@@ -380,6 +385,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         version: params.releaseTag || 'UNKNOWN',
         branch: params.gitBranch || 'main',
         credentialId,
+        projectId: params.projectId,
+        applicationId: params.applicationId,
       });
       createdId = created.scan_id;
       createdStatus = created.status || createdStatus;
@@ -678,16 +685,22 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openScanKey]);
 
-  const addProject = (newProj: Partial<Project>) => {
+  const addProject = async (newProj: Partial<Project>) => {
+    const name = newProj.name?.trim() || 'new-service';
+    const component = newProj.component?.trim() || `${name}-svc`;
+    const created = await api.createCatalogProject({
+      name,
+      applications: component ? [component] : [],
+    });
     const proj: Project = {
-      id: `proj-${Date.now()}`,
-      name: newProj.name || 'new-service',
-      component: newProj.component || 'backend-api',
+      id: created.id,
+      name: created.name,
+      component: created.applications[0]?.name || component,
       version: newProj.version || 'v1.0.0',
       riskScore: newProj.riskScore || 3.0,
       riskLevel: newProj.riskLevel || 'Low',
       complianceScore: newProj.complianceScore || 90.0,
-      dossierUrl: `/dossier/${newProj.name || 'service'}`,
+      dossierUrl: `/dossier/${created.name}`,
       componentsCount: newProj.componentsCount || 15,
       criticalCount: newProj.criticalCount || 0,
       highCount: newProj.highCount || 0,
@@ -699,7 +712,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       tags: newProj.tags || ['service'],
       status: 'Audited',
     };
-    setProjects(prev => [proj, ...prev]);
+    setProjects(prev => [proj, ...prev.filter((item) => item.id !== proj.id)]);
     addToast({
       type: 'success',
       title: 'Project Added',
@@ -718,6 +731,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const saved = await api.createInventoryComponents(items.map((item) => ({
       project: item.project || '',
       project_application: item.projectApplication || '',
+      project_id: item.projectId,
+      application_id: item.applicationId,
       name: item.name || '',
       package_name: item.packageName || item.name || '',
       version: item.version || '',

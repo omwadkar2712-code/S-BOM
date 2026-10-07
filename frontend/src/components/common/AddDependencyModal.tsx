@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useAppState } from '../../context/AppStateContext';
 import { X, PackagePlus, Box, Info } from 'lucide-react';
 import { Ecosystem, LicenseType, ComponentFieldType, Severity } from '../../types';
+import { ProjectApplicationSelect } from './ProjectApplicationSelect';
+import type { CatalogRecord } from '../../api/client';
 
 export const AddDependencyModal: React.FC = () => {
-  const { addDependencyModalOpen, setAddDependencyModalOpen, addComponent, addToast, projects } = useAppState();
+  const { addDependencyModalOpen, setAddDependencyModalOpen, addComponent, addToast } = useAppState();
   
-  // Field States matching the Software Inventory table exactly
-  const [projectName, setProjectName] = useState(projects[0]?.name || 'payments-api');
-  const [projectApplication, setProjectApplication] = useState('backend-api');
+  const [selectedProject, setSelectedProject] = useState<CatalogRecord | null>(null);
+  const [selectedApplication, setSelectedApplication] = useState<CatalogRecord | null>(null);
   const [name, setName] = useState('');
   const [packageName, setPackageName] = useState('');
   const [version, setVersion] = useState('1.0.0');
@@ -35,6 +36,17 @@ export const AddDependencyModal: React.FC = () => {
     e.preventDefault();
     if (!name.trim() && !packageName.trim()) return;
 
+    const projectName = selectedProject?.name?.trim() || '';
+    const projectApplication = selectedApplication?.name?.trim() || '';
+    if (!selectedProject?.id || !selectedApplication?.id) {
+      addToast({
+        type: 'warning',
+        title: 'Validation Error',
+        message: 'Select a project and an application/service that belongs to it.',
+      });
+      return;
+    }
+
     const compName = name.trim() || packageName.trim();
     const pkgName = packageName.trim() || compName;
     const finalPurl = purl.trim() || `pkg:${ecosystem.toLowerCase()}/${pkgName}@${version.trim()}`;
@@ -44,8 +56,10 @@ export const AddDependencyModal: React.FC = () => {
         name: compName,
         packageName: pkgName,
         version: version.trim() || '1.0.0',
-        project: projectName.trim() || 'payments-api',
-        projectApplication: projectApplication.trim() || 'backend-api',
+        project: projectName,
+        projectId: selectedProject.id,
+        projectApplication,
+        applicationId: selectedApplication.id,
         fieldType,
         ecosystem,
         license,
@@ -101,39 +115,17 @@ export const AddDependencyModal: React.FC = () => {
         <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
           {/* Row 1: Project Name & Project Application */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            <div>
-              <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1.5">
-                Project Name *
-              </label>
-              <input
-                type="text"
-                required
-                list="modal-project-list"
-                value={projectName}
-                onChange={e => setProjectName(e.target.value)}
-                placeholder="e.g. payments-api"
-                className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <datalist id="modal-project-list">
-                {projects.map(p => (
-                  <option key={p.id} value={p.name} />
-                ))}
-              </datalist>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1.5">
-                Project Application *
-              </label>
-              <input
-                type="text"
-                required
-                value={projectApplication}
-                onChange={e => setProjectApplication(e.target.value)}
-                placeholder="e.g. backend-api, auth-service"
-                className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-              />
-            </div>
+            <ProjectApplicationSelect
+              variant="form"
+              required
+              projectLabel="Project Name"
+              applicationLabel="Project Application"
+              value={{ project: selectedProject, application: selectedApplication }}
+              onChange={({ project, application }) => {
+                setSelectedProject(project);
+                setSelectedApplication(application);
+              }}
+            />
           </div>
 
           {/* Row 2: Component Name & Package Name */}

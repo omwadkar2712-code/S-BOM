@@ -13,6 +13,7 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
+from app.catalog import CatalogError, CatalogRepo
 from app.core.config import Config, load
 from app.credentials.service import Audit, CredentialStore, Credentials
 from app.core.db import connect, ensure_alive, migrate
@@ -46,6 +47,10 @@ def _org(request: Request) -> str:
     return (request.headers.get("x-organization-id") or "default").strip() or "default"
 
 
+def _catalog_error(exc: CatalogError, request_id: str) -> JSONResponse:
+    return _error(exc.code, exc.message, request_id, exc.status)
+
+
 def _with_sources(queue: JobQueue, rows: list[dict]) -> list[dict]:
     labels = queue.source_labels([row["id"] for row in rows])
     decorated = []
@@ -66,6 +71,7 @@ def build(cfg: Config | None = None) -> FastAPI:
     audit = Audit(db)
     scans = ScanRepo(db)
     boms = BomRepo(db)
+    catalog = CatalogRepo(db)
     queue = JobQueue(db)
     vulns = VulnProvider(cfg.vuln_provider, cfg.vuln_timeout_seconds, cfg.mitre_api_url)
     orch = Orchestrator(cfg, scans, boms, queue, store, creds, audit, vulns)
@@ -75,6 +81,7 @@ def build(cfg: Config | None = None) -> FastAPI:
     app.state.orch = orch
     app.state.scans = scans
     app.state.boms = boms
+    app.state.catalog = catalog
     app.state.creds = creds
     app.state.audit = audit
     app.state.store = store
@@ -132,6 +139,8 @@ def build(cfg: Config | None = None) -> FastAPI:
         paths: list[str] | None = Form(default=None),
         project_name: str = Form(default=""),
         application_name: str = Form(default=""),
+        project_id: str = Form(default=""),
+        application_id: str = Form(default=""),
         version: str = Form(default=""),
     ):
         length = request.headers.get("content-length")
@@ -179,9 +188,15 @@ def build(cfg: Config | None = None) -> FastAPI:
         except Exception:
             log.exception("local upload failed")
             return _error("INVALID_INPUT", "multipart parse failed", rid(request), 400)
-        if not application_name:
+        if not application_name and not application_id:
             return _error("INVALID_INPUT", "application_name is required", rid(request), 400)
         org = _org(request)
+        try:
+            bound = _bind_scan_target(catalog, org, project_id, application_id, project_name, application_name)
+        except CatalogError as exc:
+            return _catalog_error(exc, rid(request))
+        if bound is not None:
+            project_name, application_name = bound.project_name, bound.application_name
         key = f"uploads/{org}/{uuid.uuid4()}-{_safe_name(upload_name)}"
         from io import BytesIO
 
@@ -223,9 +238,22 @@ def build(cfg: Config | None = None) -> FastAPI:
             validate_repo_url(body.get("repository_url") or "")
         except ValueError as exc:
             return _error("INVALID_REPOSITORY", str(exc), rid(request), 400)
-        if not body.get("application_name"):
+        if not body.get("application_name") and not body.get("application_id"):
             return _error("INVALID_INPUT", "application_name is required", rid(request), 400)
         org = _org(request)
+        try:
+            bound = _bind_scan_target(
+                catalog,
+                org,
+                body.get("project_id") or "",
+                body.get("application_id") or "",
+                body.get("project_name") or "",
+                body.get("application_name") or "",
+            )
+        except CatalogError as exc:
+            return _catalog_error(exc, rid(request))
+        project_name = bound.project_name if bound else (body.get("project_name") or "")
+        application_name = bound.application_name if bound else body.get("application_name")
         version = body.get("version") or ""
         strategy = "VERSION_MANUAL"
         if not version:
@@ -236,9 +264,9 @@ def build(cfg: Config | None = None) -> FastAPI:
             scan = orch.create_scan(
                 {
                     "organization_id": org,
-                    "project_id": body.get("project_name") or "",
-                    "application_id": body.get("application_name"),
-                    "application_name": body.get("application_name"),
+                    "project_id": project_name,
+                    "application_id": application_name,
+                    "application_name": application_name,
                     "application_version": version,
                     "version_strategy": strategy,
                     "bom_type": "SBOM",
@@ -268,6 +296,61 @@ def build(cfg: Config | None = None) -> FastAPI:
         status = (request.query_params.get("status") or "").strip()
         data = list_projects(scans, boms, _org(request), q=q, status=status)
         return _envelope(data, rid(request))
+
+    @app.get("/api/v1/catalog/projects")
+    def catalog_projects(request: Request, q: str = "", limit: int = 50, cursor: str = ""):
+        """Searchable project names for dependent dropdowns. IDs are catalog UUIDs."""
+        try:
+            page = catalog.list_projects(_org(request), q=q, limit=limit, cursor=cursor or None)
+        except CatalogError as exc:
+            return _catalog_error(exc, rid(request))
+        return _envelope(page, rid(request))
+
+    @app.post("/api/v1/catalog/projects")
+    async def create_catalog_project(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            return _error("INVALID_INPUT", "malformed JSON body", rid(request), 400)
+        if not isinstance(body, dict):
+            return _error("INVALID_INPUT", "project name is required", rid(request), 400)
+        names = body.get("applications") or body.get("application_names") or []
+        if isinstance(names, str):
+            names = [names]
+        app_names = []
+        for item in names:
+            if isinstance(item, dict):
+                app_names.append(str(item.get("name") or ""))
+            else:
+                app_names.append(str(item or ""))
+        try:
+            created = catalog.create_project(_org(request), str(body.get("name") or ""), app_names)
+        except CatalogError as exc:
+            return _catalog_error(exc, rid(request))
+        return _envelope(created, rid(request), 201)
+
+    @app.get("/api/v1/catalog/projects/{project_id}/applications-services")
+    def catalog_applications(project_id: str, request: Request, q: str = "", limit: int = 50, cursor: str = ""):
+        """Applications/Services that belong to the selected project."""
+        try:
+            page = catalog.list_applications(_org(request), project_id, q=q, limit=limit, cursor=cursor or None)
+        except CatalogError as exc:
+            return _catalog_error(exc, rid(request))
+        return _envelope(page, rid(request))
+
+    @app.post("/api/v1/catalog/projects/{project_id}/applications-services")
+    async def create_catalog_application(project_id: str, request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            return _error("INVALID_INPUT", "malformed JSON body", rid(request), 400)
+        if not isinstance(body, dict):
+            return _error("INVALID_INPUT", "application/service name is required", rid(request), 400)
+        try:
+            created = catalog.ensure_application(_org(request), project_id, str(body.get("name") or ""))
+        except CatalogError as exc:
+            return _catalog_error(exc, rid(request))
+        return _envelope(created, rid(request), 201)
 
     @app.get("/api/v1/scans/{scan_id}")
     def get_scan(scan_id: str, request: Request):
@@ -481,8 +564,12 @@ def build(cfg: Config | None = None) -> FastAPI:
         items = body.get("components") if isinstance(body, dict) else None
         if not isinstance(items, list) or not items:
             return _error("INVALID_INPUT", "components are required", rid(request), 400)
+        org = _org(request)
         try:
-            saved = boms.add_inventory_components(_org(request), items)
+            normalized = [_bind_inventory_item(catalog, org, item) for item in items]
+            saved = boms.add_inventory_components(org, normalized)
+        except CatalogError as exc:
+            return _catalog_error(exc, rid(request))
         except ValueError as exc:
             return _error("INVALID_INPUT", str(exc), rid(request), 400)
         return _envelope(saved, rid(request), 201)
@@ -625,6 +712,48 @@ def build(cfg: Config | None = None) -> FastAPI:
     return app
 
 
+def _bind_scan_target(catalog: CatalogRepo, org: str, project_id, application_id, project_name, application_name):
+    """Validate IDs when the UI sent them; otherwise keep name-based scans and seed the catalog."""
+    project_id = str(project_id or "").strip()
+    application_id = str(application_id or "").strip()
+    project_name = str(project_name or "").strip()
+    application_name = str(application_name or "").strip()
+    if project_id or application_id:
+        return catalog.bind(
+            org,
+            project_id=project_id,
+            application_id=application_id,
+            project_name=project_name,
+            application_name=application_name,
+            persist_missing=False,
+        )
+    if project_name and application_name:
+        return catalog.ensure_named(org, project_name, application_name)
+    return None
+
+
+def _bind_inventory_item(catalog: CatalogRepo, org: str, item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError("each component must be an object")
+    project_id = str(item.get("project_id") or item.get("projectId") or "").strip()
+    application_id = str(item.get("application_id") or item.get("applicationId") or "").strip()
+    if not project_id and not application_id:
+        return item
+    bound = catalog.bind(
+        org,
+        project_id=project_id,
+        application_id=application_id,
+        project_name=str(item.get("project") or item.get("project_name") or ""),
+        application_name=str(item.get("project_application") or item.get("projectApplication") or ""),
+        persist_missing=False,
+    )
+    patched = dict(item)
+    patched["project"] = bound.project_name
+    patched["project_name"] = bound.project_name
+    patched["project_application"] = bound.application_name
+    return patched
+
+
 def _safe_name(name: str) -> str:
     base = name.replace("\\", "/").split("/")[-1]
     return base.replace("..", "")
@@ -667,6 +796,7 @@ def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, 
     bulk_id = str(uuid.uuid4())
     created = iso(utcnow())
     problems = _row_problems(errors)
+    catalog = CatalogRepo(db)
     db.execute(
         """INSERT INTO bulk_scans (id, organization_id, project_id, status, filename, total_rows, invalid_rows, created_at, validation_errors)
            VALUES (?,?,?,?,?,?,?,?,?)""",
@@ -688,12 +818,16 @@ def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, 
             error_message = "; ".join(problem["message"] for problem in row_problems)
         else:
             try:
+                project_name = row["project_name"] or project
+                application_name = row["application_name"]
+                if project_name and application_name:
+                    catalog.ensure_named(org, project_name, application_name)
                 scan = orch.create_scan(
                     {
                         "organization_id": org,
-                        "project_id": row["project_name"] or project,
-                        "application_id": row["application_name"],
-                        "application_name": row["application_name"],
+                        "project_id": project_name,
+                        "application_id": application_name,
+                        "application_name": application_name,
                         "application_version": row["version"] or "UNKNOWN",
                         "version_strategy": "VERSION_MANUAL",
                         "bom_type": "SBOM",

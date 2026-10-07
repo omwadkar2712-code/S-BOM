@@ -38,6 +38,8 @@ import {
 } from 'lucide-react';
 import { useAppState } from '../../context/AppStateContext';
 import type { ScanJob } from '../../types';
+import { ProjectApplicationSelect } from '../../components/common/ProjectApplicationSelect';
+import type { CatalogRecord } from '../../api/client';
 import { filesFromDataTransfer, folderLabel, folderTypeLabel, isArchiveName, isManifestRelativePath, selectFolderManifests, SUPPORTED_MANIFEST_HINT, type FolderFile } from './localFolder';
 import { classifyBulkCsv } from './bulkRows';
 import { PipelineGrid, ScanResultDetails } from './ScanResultDetails';
@@ -98,8 +100,10 @@ export const SecurityScans: React.FC = () => {
   const [newScanStep, setNewScanStep] = useState<'input' | 'review'>('input');
 
   // Form State: Project Information
-  const [projectName, setProjectName] = useState('');
-  const [appService, setAppService] = useState('');
+  const [selectedProject, setSelectedProject] = useState<CatalogRecord | null>(null);
+  const [selectedApplication, setSelectedApplication] = useState<CatalogRecord | null>(null);
+  const projectName = selectedProject?.name || '';
+  const appService = selectedApplication?.name || '';
   const [releaseVersion, setReleaseVersion] = useState('');
   const [description, setDescription] = useState('');
 
@@ -299,11 +303,11 @@ export const SecurityScans: React.FC = () => {
   const handleProceedToReview = (e: React.FormEvent) => {
     e.preventDefault();
     if (sourceType !== 'bulk') {
-      if (!projectName.trim()) {
+      if (!selectedProject?.id) {
         addToast({ type: 'warning', title: 'Validation Error', message: 'Project Name is required.' });
         return;
       }
-      if (!appService.trim()) {
+      if (!selectedApplication?.id) {
         addToast({ type: 'warning', title: 'Validation Error', message: 'Application / Service is required.' });
         return;
       }
@@ -379,6 +383,8 @@ export const SecurityScans: React.FC = () => {
       const scanId = await startScan({
         projectName: sourceType === 'bulk' ? (projectName.trim() || firstBulk?.project || 'Bulk scan') : projectName,
         appService: sourceType === 'bulk' ? (appService.trim() || firstBulk?.name || '') : appService,
+        projectId: sourceType === 'bulk' ? undefined : selectedProject?.id,
+        applicationId: sourceType === 'bulk' ? undefined : selectedApplication?.id,
         releaseTag: sourceType === 'bulk' ? (releaseVersion.trim() || firstBulk?.version || '') : releaseVersion,
         scanType: sourceType === 'local' ? 'Local Source' : sourceType === 'git' ? 'Remote Git' : 'Bulk Scan',
         source: sourceDesc,
@@ -853,35 +859,19 @@ export const SecurityScans: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      PROJECT NAME {sourceType !== 'bulk' && <span className="text-red-500">*</span>}
-                    </label>
-                    <input
-                      type="text"
-                      required={sourceType !== 'bulk'}
-                      value={projectName}
-                      onChange={(e) => setProjectName(e.target.value)}
-                      placeholder="e.g. Payments API"
-                      className="w-full text-xs px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500"
-                    />
-                    <p className="text-[10px] text-gray-400 mt-1">A short, descriptive name for your project.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      APPLICATION / SERVICE {sourceType !== 'bulk' && <span className="text-red-500">*</span>}
-                    </label>
-                    <input
-                      type="text"
-                      required={sourceType !== 'bulk'}
-                      value={appService}
-                      onChange={(e) => setAppService(e.target.value)}
-                      placeholder="e.g. payments-api"
-                      className="w-full text-xs px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500"
-                    />
-                    <p className="text-[10px] text-gray-400 mt-1">The application or service name.</p>
-                  </div>
+                  <ProjectApplicationSelect
+                    variant="scan"
+                    required={sourceType !== 'bulk'}
+                    projectLabel="PROJECT NAME"
+                    applicationLabel="APPLICATION / SERVICE"
+                    projectHint="A short, descriptive name for your project."
+                    applicationHint="The application or service name."
+                    value={{ project: selectedProject, application: selectedApplication }}
+                    onChange={({ project, application }) => {
+                      setSelectedProject(project);
+                      setSelectedApplication(application);
+                    }}
+                  />
 
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">

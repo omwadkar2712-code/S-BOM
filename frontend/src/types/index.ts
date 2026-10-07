@@ -65,7 +65,9 @@ export interface SBOMComponent {
   name: string;
   version: string;
   project: string;
+  projectId?: string;
   projectApplication?: string;
+  applicationId?: string;
   packageName?: string;
   fieldType?: ComponentFieldType;
   fileName?: string;

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   FolderGit2,
   Package,
@@ -41,6 +41,7 @@ function relativeTime(iso: string): string {
 }
 
 export const ProjectsMicroservices: React.FC = () => {
+  const navigate = useNavigate();
   const { addToast } = useAppState();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All Statuses');
@@ -270,7 +271,13 @@ export const ProjectsMicroservices: React.FC = () => {
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {projectsList.map((p) => (
                   <tr key={p.id} className="hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-colors">
-                    <td className="py-3.5 pr-4 font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">{p.name}</td>
+                    <td
+                      onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(p.name)}`)}
+                      className="py-3.5 pr-4 font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap cursor-pointer hover:underline hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                      title={`View vulnerability management for ${p.name}`}
+                    >
+                      {p.name}
+                    </td>
                     <td className="py-3.5 px-4 text-gray-600 dark:text-gray-400 whitespace-nowrap">{p.classifier}</td>
                     <td className="py-3.5 px-4 whitespace-nowrap">
                       <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold border ${riskColor(p.risk)}`}>

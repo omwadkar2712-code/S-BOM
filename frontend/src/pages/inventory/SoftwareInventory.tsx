@@ -730,7 +730,11 @@ export const SoftwareInventory: React.FC = () => {
                     <td className="py-3 pl-4 pr-3 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <FolderGit2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                        <span className="font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer">
+                        <span
+                          onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(c.projectName)}`)}
+                          className="font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer hover:underline transition-colors"
+                          title={`View vulnerability management for ${c.projectName}`}
+                        >
                           {c.projectName}
                         </span>
                       </div>

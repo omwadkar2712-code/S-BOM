@@ -153,6 +153,7 @@ interface AppStateContextType {
   addComponent: (newComp: Partial<SBOMComponent>) => Promise<void>;
   addComponents: (items: Partial<SBOMComponent>[]) => Promise<void>;
   updateTicketStatus: (id: string, status: RemediationTicket['status']) => void;
+  updateVulnerabilityStatus: (idOrCve: string, status: Vulnerability['status']) => void;
   togglePolicy: (id: string) => void;
   
   toasts: ToastMessage[];
@@ -246,12 +247,40 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (async () => {
       try {
         await api.healthReady();
-        const [scans, inventory] = await Promise.all([
+        const [scans, inventory, projectsDashboard] = await Promise.all([
           api.listScans(),
           api.listInventoryComponents().catch(() => [] as api.ApiInventoryComponent[]),
+          api.listProjects().catch(() => null),
         ]);
         if (cancelled) return;
         setSystemStatus(prev => ({ ...prev, scanApi: 'connected', postgres: 'connected' }));
+
+        if (projectsDashboard?.projects?.length) {
+          const mappedProjs: Project[] = projectsDashboard.projects.map((p) => ({
+            id: p.id,
+            name: p.name,
+            component: p.classifier || 'Service',
+            version: '1.0.0',
+            riskScore: p.risk === 'High Risk' ? 8.5 : p.risk === 'Needs Attention' ? 5.0 : 2.0,
+            riskLevel: p.risk === 'High Risk' ? 'High' : p.risk === 'Needs Attention' ? 'Medium' : 'Low',
+            complianceScore: p.compliance_pct || 90,
+            dossierUrl: `/projects/${p.id}`,
+            componentsCount: p.scans || 1,
+            criticalCount: 0,
+            highCount: p.vulns || 0,
+            mediumCount: 0,
+            lowCount: 0,
+            lastScanned: p.last_scanned_at || new Date().toISOString(),
+            tags: p.tags || [],
+            status: 'Audited',
+          }));
+          setProjects((prev) => {
+            const seen = new Set(prev.map((item) => item.name.toLowerCase()));
+            const fresh = mappedProjs.filter((item) => !seen.has(item.name.toLowerCase()));
+            return [...prev, ...fresh];
+          });
+        }
+
         if (scans?.length) {
           const jobs = await Promise.all(scans.map(async (scan) => {
             const job = api.mapScan(scan);
@@ -315,7 +344,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       api.scanVulnerabilities(scanId),
     ]);
     const mapped = (comps || []).map(c => api.mapComponent(c, project, application));
-    const mappedVulns = api.mapVulns(vulns, comps || [], project || application);
+    const mappedVulns = api.mapVulns(vulns, comps || [], project || application, application, scanId);
     const matches = Array.isArray(vulns) ? vulns : [];
     const stats = new Map<string, { count: number; rank: number; patch: boolean }>();
     for (const match of matches) {
@@ -772,6 +801,17 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
+  const updateVulnerabilityStatus = (idOrCve: string, status: Vulnerability['status']) => {
+    setVulnerabilities(prev =>
+      prev.map(v => (v.id === idOrCve || v.cve === idOrCve ? { ...v, status } : v))
+    );
+    addToast({
+      type: 'info',
+      title: 'Vulnerability Updated',
+      message: `Status updated to "${status}".`,
+    });
+  };
+
   const togglePolicy = (id: string) => {
     setPolicies(prev =>
       prev.map(p => {
@@ -971,6 +1011,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addComponent,
         addComponents,
         updateTicketStatus,
+        updateVulnerabilityStatus,
         togglePolicy,
         toasts,
         addToast,

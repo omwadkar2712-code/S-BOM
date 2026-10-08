@@ -8,7 +8,7 @@ import { Dashboard } from './pages/dashboard';
 import { SecurityScans } from './pages/scans';
 import { SoftwareInventory, AddInventoryComponent, SBOMArtifacts } from './pages/inventory';
 import { ProjectsMicroservices } from './pages/projects';
-import { Vulnerabilities, Remediation } from './pages/vulnerabilities';
+import { Vulnerabilities, Remediation, VulnerabilityDetail } from './pages/vulnerabilities';
 import { Compliance, Policies } from './pages/compliance';
 import { ExportCenter } from './pages/export';
 import { SupplyChain } from './pages/supply-chain';
@@ -34,6 +34,7 @@ export const App: React.FC = () => {
               <Route path="/software-inventory/artifacts" element={<SBOMArtifacts />} />
 
               <Route path="/vulnerabilities" element={<Vulnerabilities />} />
+              <Route path="/vulnerabilities/:cveId" element={<VulnerabilityDetail />} />
               <Route path="/remediation" element={<Remediation />} />
               <Route path="/compliance" element={<Compliance />} />
               <Route path="/export-center" element={<ExportCenter />} />

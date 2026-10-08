@@ -29,13 +29,15 @@ export interface Project {
 export interface Vulnerability {
   id: string;
   cve: string;
+  name?: string;
   package: string;
   version: string;
   project: string;
+  application?: string;
   cvss: number; // 0.0 - 10.0
   epss: number; // 0.0 - 1.0 (exploit prediction scoring system)
   severity: Severity;
-  status: 'Open' | 'In Progress' | 'Resolved' | 'Wont Fix' | 'Mitigated';
+  status: 'Open' | 'In Progress' | 'Resolved' | 'Wont Fix' | 'Mitigated' | 'Fixed' | 'Risk Accepted' | 'Closed';
   fixVersion?: string;
   age: string; // e.g. "4d ago"
   description: string;
@@ -48,6 +50,16 @@ export interface Vulnerability {
   patchRecommendation?: string;
   patchCommand?: string;
   ecosystem: Ecosystem;
+  purl?: string;
+  direct?: boolean;
+  dependencyPath?: string;
+  source?: string;
+  ticketId?: string;
+  firstDetected?: string;
+  lastDetected?: string;
+  scanVersion?: string;
+  sbomVersion?: string;
+  statusChanges?: string;
 }
 
 export type ComponentFieldType =

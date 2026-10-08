@@ -41,6 +41,9 @@ export const TopHeader: React.FC<TopHeaderProps> = () => {
       if (location.pathname === '/security-scans/new') return 'Launch Security Scan';
       return 'Security Scans';
     }
+    if (location.pathname.startsWith('/vulnerabilities')) {
+      return 'Vulnerability Management';
+    }
     switch (location.pathname) {
       case '/software-inventory/add':
         return 'Add Inventory Component';

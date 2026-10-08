@@ -26,20 +26,20 @@ class CredentialStore:
         nonce = os.urandom(12)
         ciphertext = self.aead.encrypt(nonce, material, ref.encode())
         self.db.execute(
-            """INSERT INTO credential_secrets (reference, nonce, ciphertext) VALUES (?,?,?)
-               ON CONFLICT(reference) DO UPDATE SET nonce=excluded.nonce, ciphertext=excluded.ciphertext""",
+            """INSERT INTO tbl_credential_secrets (secret_reference, nonce, ciphertext) VALUES (?,?,?)
+               ON CONFLICT (secret_reference) DO UPDATE SET nonce=excluded.nonce, ciphertext=excluded.ciphertext""",
             (ref, nonce, ciphertext),
         )
         finish(self.db)
 
     def get(self, ref: str) -> bytes:
-        row = self.db.execute("SELECT nonce, ciphertext FROM credential_secrets WHERE reference=?", (ref,)).fetchone()
+        row = self.db.execute("SELECT nonce, ciphertext FROM tbl_credential_secrets WHERE secret_reference=?", (ref,)).fetchone()
         if row is None:
             raise LookupError("secret not found")
         return self.aead.decrypt(row["nonce"], row["ciphertext"], ref.encode())
 
     def delete(self, ref: str) -> None:
-        self.db.execute("DELETE FROM credential_secrets WHERE reference=?", (ref,))
+        self.db.execute("DELETE FROM tbl_credential_secrets WHERE secret_reference=?", (ref,))
         finish(self.db)
 
 
@@ -60,6 +60,9 @@ class Credentials:
         return self._insert(org, name, "GITHUB_APP", ref, scope)
 
     def _insert(self, org: str, name: str, cred_type: str, ref: str, scope: list[str] | None) -> dict:
+        from app.catalog.store import ensure_security_scans
+
+        ensure_security_scans(self.db, org)
         now = iso(utcnow())
         cred = {
             "id": str(uuid.uuid4()),
@@ -73,12 +76,15 @@ class Credentials:
             "updated_at": now,
         }
         self.db.execute(
-            """INSERT INTO git_credentials (id, organization_id, provider, credential_type, name,
-               secret_reference, repository_scope, status, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO tbl_git_credentials (
+               id, security_scans_id, organization_id, provider, credential_type, credential_name,
+               secret_reference, repository_scope, credential_status, created_at, updated_at)
+               SELECT ?, ws.id, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               FROM tbl_security_scans ws
+               WHERE ws.organization_id = ?""",
             (
                 cred["id"], org, "GITHUB", cred_type, name, ref,
-                ",".join(scope) if scope else "*", "ACTIVE", now, now,
+                ",".join(scope) if scope else "*", "ACTIVE", now, now, org,
             ),
         )
         finish(self.db)
@@ -86,29 +92,30 @@ class Credentials:
 
     def list(self, org: str) -> list[dict]:
         rows = self.db.execute(
-            """SELECT id, organization_id, provider, credential_type, name, repository_scope, status, created_at, updated_at
-               FROM git_credentials WHERE organization_id=? ORDER BY created_at DESC""",
+            """SELECT id, organization_id, provider, credential_type, credential_name AS name,
+                      repository_scope, credential_status AS status, created_at, updated_at
+               FROM tbl_git_credentials WHERE organization_id=? ORDER BY created_at DESC""",
             (org,),
         ).fetchall()
         return [_public(row) for row in rows]
 
     def revoke(self, cred_id: str, org: str) -> None:
         row = self.db.execute(
-            "SELECT secret_reference FROM git_credentials WHERE id=? AND organization_id=?",
+            "SELECT secret_reference FROM tbl_git_credentials WHERE id=? AND organization_id=?",
             (cred_id, org),
         ).fetchone()
         if row is None:
             raise LookupError("not found")
         self.secrets.delete(row["secret_reference"])
         self.db.execute(
-            "UPDATE git_credentials SET status='REVOKED', updated_at=? WHERE id=? AND organization_id=?",
+            "UPDATE tbl_git_credentials SET credential_status='REVOKED', updated_at=? WHERE id=? AND organization_id=?",
             (iso(utcnow()), cred_id, org),
         )
         finish(self.db)
 
     def resolve(self, cred_id: str, org: str) -> bytes:
         row = self.db.execute(
-            "SELECT secret_reference, status FROM git_credentials WHERE id=? AND organization_id=?",
+            "SELECT secret_reference, credential_status AS status FROM tbl_git_credentials WHERE id=? AND organization_id=?",
             (cred_id, org),
         ).fetchone()
         if row is None:
@@ -139,9 +146,24 @@ class Audit:
         self.db = db
 
     def record(self, kind: str, organization_id: str = "", scan_id: str = "", credential_id: str = "", metadata: dict | None = None) -> None:
+        security_scans_id = None
+        if organization_id:
+            from app.catalog.store import ensure_security_scans
+
+            security_scans_id = ensure_security_scans(self.db, organization_id)
         self.db.execute(
-            """INSERT INTO audit_logs (id, kind, organization_id, scan_id, credential_id, metadata, created_at)
-               VALUES (?,?,?,?,?,?,?)""",
-            (str(uuid.uuid4()), kind, organization_id or None, scan_id or None, credential_id or None, json.dumps(metadata or {}), iso(datetime.now(timezone.utc))),
+            """INSERT INTO tbl_audit_logs (
+               id, audit_kind, security_scans_id, organization_id, scan_run_id, credential_id, audit_metadata, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                str(uuid.uuid4()),
+                kind,
+                security_scans_id,
+                organization_id or None,
+                scan_id or None,
+                credential_id or None,
+                json.dumps(metadata or {}),
+                iso(datetime.now(timezone.utc)),
+            ),
         )
         finish(self.db)

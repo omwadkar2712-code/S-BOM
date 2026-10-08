@@ -104,12 +104,25 @@ def test_inventory_component_is_saved_and_listed():
     assert len(second_page.json()["data"]["items"]) == 1
     assert second_page.json()["data"]["next_cursor"] is None
     with psycopg.connect(TEST_DB, autocommit=True) as conn:
-        projects = conn.execute("SELECT COUNT(*) FROM projects WHERE name = %s", ("checkout-api",)).fetchone()[0]
+        projects = conn.execute(
+            "SELECT COUNT(*) FROM tbl_projects_and_microservices WHERE project_name = %s",
+            ("checkout-api",),
+        ).fetchone()[0]
+        services = conn.execute(
+            "SELECT COUNT(*) FROM tbl_project_applications_and_services WHERE service_name = %s",
+            ("payments-service",),
+        ).fetchone()[0]
+        components = conn.execute(
+            "SELECT COUNT(*) FROM tbl_software_components_and_packages WHERE component_name = %s",
+            ("log4j-core",),
+        ).fetchone()[0]
         snapshots = conn.execute(
-            "SELECT COUNT(*) FROM bom_snapshots WHERE scanner_name = 'manual'"
+            "SELECT COUNT(*) FROM tbl_bom_snapshots WHERE scanner_name = 'manual'"
         ).fetchone()[0]
     assert projects == 1
-    assert snapshots == 1
+    assert services == 1
+    assert components == 1
+    assert snapshots == 0
 
     missing = client.post(
         "/api/v1/inventory/components",

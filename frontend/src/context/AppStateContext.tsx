@@ -744,6 +744,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       purl: item.purl,
       direct_dependency: item.directDependency,
       supplier: item.supplier,
+      file_name: item.fileName,
+      created_by: item.createdBy,
     })));
     rememberComponents(saved.map(api.mapInventoryComponent));
   };

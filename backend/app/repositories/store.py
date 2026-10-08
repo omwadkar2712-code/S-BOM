@@ -32,7 +32,6 @@ _ECOSYSTEM_LABELS = {
     "packagist": "Packagist",
     "composer": "Packagist",
 }
-_MANUAL_SCANNER = "manual"
 _MAX_INVENTORY_BATCH = 5000
 
 
@@ -67,17 +66,24 @@ class ScanRepo:
         self.db = db
 
     def create_scan(self, scan: dict[str, Any]) -> None:
+        from app.catalog.store import ensure_security_scans
+
+        ensure_security_scans(self.db, scan["organization_id"])
         self.db.execute(
-            """INSERT INTO scans (id, organization_id, project_id, application_id,
+            """INSERT INTO tbl_scan_runs (
+               id, security_scans_id, organization_id, project_id, application_id,
                application_name, application_version, version_strategy, bom_type,
-               source_type, status, stage, idempotency_key, created_at, bulk_scan_id, bulk_row)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               source_type, scan_status, scan_stage, idempotency_key, created_at,
+               bulk_scan_id, bulk_row_number)
+               SELECT ?, ws.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               FROM tbl_security_scans ws
+               WHERE ws.organization_id = ?""",
             (
                 scan["id"], scan["organization_id"], scan["project_id"], scan["application_id"],
                 scan["application_name"], scan["application_version"], scan["version_strategy"],
                 scan["bom_type"], scan["source_type"], scan["status"], scan["stage"],
                 scan["idempotency_key"], iso(scan["created_at"]), scan.get("bulk_scan_id") or None,
-                scan.get("bulk_row") or 0,
+                scan.get("bulk_row") or 0, scan["organization_id"],
             ),
         )
         finish(self.db)
@@ -85,11 +91,11 @@ class ScanRepo:
     def get_scan(self, scan_id: str) -> dict[str, Any] | None:
         row = self.db.execute(
             """SELECT id, organization_id, project_id, application_id, application_name,
-                      application_version, version_strategy, bom_type, source_type, status,
-                      stage, error_code, error_message, idempotency_key, created_at,
-                      started_at, completed_at, COALESCE(bulk_scan_id,''), bulk_row,
-                      COALESCE(snapshot_id,'')
-               FROM scans WHERE id = ?""",
+                      application_version, version_strategy, bom_type, source_type, scan_status,
+                      scan_stage, error_code, error_message, idempotency_key, created_at,
+                      started_at, completed_at, COALESCE(bulk_scan_id,''), bulk_row_number,
+                      COALESCE(bom_snapshot_id,'')
+               FROM tbl_scan_runs WHERE id = ?""",
             (scan_id,),
         ).fetchone()
         return _scan_row(row) if row else None
@@ -97,11 +103,11 @@ class ScanRepo:
     def find_by_key(self, key: str) -> dict[str, Any] | None:
         row = self.db.execute(
             """SELECT id, organization_id, project_id, application_id, application_name,
-                      application_version, version_strategy, bom_type, source_type, status,
-                      stage, error_code, error_message, idempotency_key, created_at,
-                      started_at, completed_at, COALESCE(bulk_scan_id,''), bulk_row,
-                      COALESCE(snapshot_id,'')
-               FROM scans WHERE idempotency_key = ?""",
+                      application_version, version_strategy, bom_type, source_type, scan_status,
+                      scan_stage, error_code, error_message, idempotency_key, created_at,
+                      started_at, completed_at, COALESCE(bulk_scan_id,''), bulk_row_number,
+                      COALESCE(bom_snapshot_id,'')
+               FROM tbl_scan_runs WHERE idempotency_key = ?""",
             (key,),
         ).fetchone()
         return _scan_row(row) if row else None
@@ -111,18 +117,18 @@ class ScanRepo:
             limit = 100
         rows = self.db.execute(
             """SELECT id, organization_id, project_id, application_id, application_name,
-                      application_version, version_strategy, bom_type, source_type, status,
-                      stage, error_code, error_message, idempotency_key, created_at,
-                      started_at, completed_at, COALESCE(bulk_scan_id,''), bulk_row,
-                      COALESCE(snapshot_id,'')
-               FROM scans WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?""",
+                      application_version, version_strategy, bom_type, source_type, scan_status,
+                      scan_stage, error_code, error_message, idempotency_key, created_at,
+                      started_at, completed_at, COALESCE(bulk_scan_id,''), bulk_row_number,
+                      COALESCE(bom_snapshot_id,'')
+               FROM tbl_scan_runs WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?""",
             (org_id, limit),
         ).fetchall()
         return [_scan_row(row) for row in rows]
 
     def set_stage(self, scan_id: str, stage: str) -> None:
         self.db.execute(
-            "UPDATE scans SET stage = ? WHERE id = ? AND status <> 'CANCELLED'",
+            "UPDATE tbl_scan_runs SET scan_stage = ? WHERE id = ? AND scan_status <> 'CANCELLED'",
             (stage, scan_id),
         )
         finish(self.db)
@@ -130,8 +136,8 @@ class ScanRepo:
     def mark_completed(self, scan_id: str, snapshot_id: str) -> None:
         now = iso(utcnow())
         self.db.execute(
-            """UPDATE scans SET status='COMPLETED', stage='COMPLETED', snapshot_id=?, completed_at=?
-               WHERE id=? AND status <> 'CANCELLED'""",
+            """UPDATE tbl_scan_runs SET scan_status='COMPLETED', scan_stage='COMPLETED', bom_snapshot_id=?, completed_at=?
+               WHERE id=? AND scan_status <> 'CANCELLED'""",
             (snapshot_id, now, scan_id),
         )
         finish(self.db)
@@ -139,8 +145,8 @@ class ScanRepo:
     def mark_failed(self, scan_id: str, code: str, message: str) -> None:
         now = iso(utcnow())
         self.db.execute(
-            """UPDATE scans SET status='FAILED', stage='FAILED', error_code=?, error_message=?, completed_at=?
-               WHERE id=? AND status <> 'CANCELLED'""",
+            """UPDATE tbl_scan_runs SET scan_status='FAILED', scan_stage='FAILED', error_code=?, error_message=?, completed_at=?
+               WHERE id=? AND scan_status <> 'CANCELLED'""",
             (code, message, now, scan_id),
         )
         finish(self.db)
@@ -148,8 +154,8 @@ class ScanRepo:
     def mark_running(self, scan_id: str) -> None:
         now = iso(utcnow())
         self.db.execute(
-            """UPDATE scans SET status='RUNNING', started_at=COALESCE(started_at, ?)
-               WHERE id=? AND status IN ('PENDING','QUEUED')""",
+            """UPDATE tbl_scan_runs SET scan_status='RUNNING', started_at=COALESCE(started_at, ?)
+               WHERE id=? AND scan_status IN ('PENDING','QUEUED')""",
             (now, scan_id),
         )
         finish(self.db)
@@ -157,42 +163,47 @@ class ScanRepo:
     def mark_cancelled(self, scan_id: str) -> None:
         now = iso(utcnow())
         self.db.execute(
-            """UPDATE scans
-               SET status='CANCELLED', stage='CANCELLED', error_code='CANCELLED',
+            """UPDATE tbl_scan_runs
+               SET scan_status='CANCELLED', scan_stage='CANCELLED', error_code='CANCELLED',
                    error_message='Cancelled by user', completed_at=?
-               WHERE id=? AND status IN ('PENDING','QUEUED','RUNNING')""",
+               WHERE id=? AND scan_status IN ('PENDING','QUEUED','RUNNING')""",
             (now, scan_id),
         )
         finish(self.db)
 
     def reopen(self, scan_id: str) -> None:
         self.db.execute(
-            """UPDATE scans SET status='QUEUED', stage='QUEUED', error_code='', error_message='', completed_at=NULL
-               WHERE id=? AND status IN ('FAILED','DEAD_LETTER','CANCELLED')""",
+            """UPDATE tbl_scan_runs SET scan_status='QUEUED', scan_stage='QUEUED', error_code='', error_message='', completed_at=NULL
+               WHERE id=? AND scan_status IN ('FAILED','DEAD_LETTER','CANCELLED')""",
             (scan_id,),
         )
         finish(self.db)
 
     def reset_for_rescan(self, scan_id: str) -> None:
         self.db.execute(
-            """UPDATE scans
-               SET status='QUEUED', stage='QUEUED', error_code='', error_message='',
-                   completed_at=NULL, started_at=NULL, snapshot_id=NULL
-               WHERE id=? AND status IN ('COMPLETED','FAILED','DEAD_LETTER','CANCELLED')""",
+            """UPDATE tbl_scan_runs
+               SET scan_status='QUEUED', scan_stage='QUEUED', error_code='', error_message='',
+                   completed_at=NULL, started_at=NULL, bom_snapshot_id=NULL
+               WHERE id=? AND scan_status IN ('COMPLETED','FAILED','DEAD_LETTER','CANCELLED')""",
             (scan_id,),
         )
         finish(self.db)
 
     def record_event(self, scan_id: str, stage: str, message: str, data: Any = None) -> None:
         self.db.execute(
-            "INSERT INTO scan_events (id, scan_id, stage, message, data, created_at) VALUES (?,?,?,?,?,?)",
-            (str(uuid.uuid4()), scan_id, stage, message, json.dumps(data) if data is not None else "null", iso(utcnow())),
+            """INSERT INTO tbl_scan_events (
+               id, scan_run_id, security_scans_id, scan_stage, event_message, event_data, created_at)
+               SELECT ?, ?, security_scans_id, ?, ?, ?, ?
+               FROM tbl_scan_runs WHERE id = ?""",
+            (str(uuid.uuid4()), scan_id, stage, message, json.dumps(data) if data is not None else "null", iso(utcnow()), scan_id),
         )
         finish(self.db)
 
     def list_events(self, scan_id: str) -> list[dict[str, Any]]:
         rows = self.db.execute(
-            "SELECT id, scan_id, stage, message, data, created_at FROM scan_events WHERE scan_id = ? ORDER BY created_at ASC",
+            """SELECT id, scan_run_id AS scan_id, scan_stage AS stage, event_message AS message,
+                      event_data AS data, created_at
+               FROM tbl_scan_events WHERE scan_run_id = ? ORDER BY created_at ASC""",
             (scan_id,),
         ).fetchall()
         out = []
@@ -272,14 +283,19 @@ class JobQueue:
 
     def enqueue(self, job: dict[str, Any]) -> None:
         self.db.execute(
-            """INSERT INTO scan_jobs (id, scan_id, organization_id, bom_type, source_type,
-               priority, status, attempts, max_attempts, payload, created_at, next_attempt_at, idempotency_key)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """INSERT INTO tbl_scan_jobs (
+               id, scan_run_id, security_scans_id, organization_id, bom_type, source_type,
+               priority, job_status, attempts, max_attempts, job_payload, created_at,
+               next_attempt_at, idempotency_key)
+               SELECT ?, ?, r.security_scans_id, ?, ?, ?, ?, 'QUEUED', 0, ?, ?, ?, ?, ?
+               FROM tbl_scan_runs r
+               WHERE r.id = ?
                ON CONFLICT (idempotency_key) DO NOTHING""",
             (
                 job["id"], job["scan_id"], job["organization_id"], job["bom_type"], job["source_type"],
-                job.get("priority") or 0, "QUEUED", 0, job.get("max_attempts") or 3,
+                job.get("priority") or 0, job.get("max_attempts") or 3,
                 json.dumps(job["payload"]), iso(job["created_at"]), iso(job["next_attempt_at"]), job["idempotency_key"],
+                job["scan_id"],
             ),
         )
         finish(self.db)
@@ -288,10 +304,11 @@ class JobQueue:
         now = utcnow()
         deadline = iso(datetime.fromtimestamp(now.timestamp() + visibility_seconds, timezone.utc))
         now_s = iso(now)
-        claim_sql = """SELECT id, scan_id, organization_id, bom_type, source_type, priority,
-                              status, attempts, max_attempts, payload, created_at, next_attempt_at, idempotency_key
-                       FROM scan_jobs
-                       WHERE status = 'QUEUED' AND next_attempt_at <= ?
+        claim_sql = """SELECT id, scan_run_id AS scan_id, organization_id, bom_type, source_type, priority,
+                              job_status AS status, attempts, max_attempts, job_payload AS payload,
+                              created_at, next_attempt_at, idempotency_key
+                       FROM tbl_scan_jobs
+                       WHERE job_status = 'QUEUED' AND next_attempt_at <= ?
                        ORDER BY priority DESC, created_at ASC
                        LIMIT 1
                        FOR UPDATE SKIP LOCKED"""
@@ -305,7 +322,7 @@ class JobQueue:
                     self.db.commit()
                     return None
                 self.db.execute(
-                    """UPDATE scan_jobs SET status='RUNNING', attempts=attempts+1, started_at=?, next_attempt_at=? WHERE id=?""",
+                    """UPDATE tbl_scan_jobs SET job_status='RUNNING', attempts=attempts+1, started_at=?, next_attempt_at=? WHERE id=?""",
                     (now_s, deadline, row["id"]),
                 )
                 self.db.commit()
@@ -328,7 +345,7 @@ class JobQueue:
 
     def complete(self, job_id: str) -> None:
         self.db.execute(
-            "UPDATE scan_jobs SET status='COMPLETED', completed_at=? WHERE id=? AND status='RUNNING'",
+            "UPDATE tbl_scan_jobs SET job_status='COMPLETED', completed_at=? WHERE id=? AND job_status='RUNNING'",
             (iso(utcnow()), job_id),
         )
         finish(self.db)
@@ -336,15 +353,15 @@ class JobQueue:
     def fail(self, job_id: str, code: str, message: str, retryable: bool, next_attempt: datetime) -> None:
         if retryable:
             self.db.execute(
-                """UPDATE scan_jobs
-                   SET status = CASE WHEN attempts >= max_attempts THEN 'DEAD_LETTER' ELSE 'QUEUED' END,
+                """UPDATE tbl_scan_jobs
+                   SET job_status = CASE WHEN attempts >= max_attempts THEN 'DEAD_LETTER' ELSE 'QUEUED' END,
                        next_attempt_at = ?, error_code = ?, error_message = ?
-                   WHERE id = ? AND status = 'RUNNING'""",
+                   WHERE id = ? AND job_status = 'RUNNING'""",
                 (iso(next_attempt), code, message, job_id),
             )
         else:
             self.db.execute(
-                "UPDATE scan_jobs SET status='FAILED', completed_at=?, error_code=?, error_message=? WHERE id=? AND status='RUNNING'",
+                "UPDATE tbl_scan_jobs SET job_status='FAILED', completed_at=?, error_code=?, error_message=? WHERE id=? AND job_status='RUNNING'",
                 (iso(utcnow()), code, message, job_id),
             )
         finish(self.db)
@@ -352,9 +369,9 @@ class JobQueue:
     def mark_cancelled(self, job_id: str) -> None:
         now = iso(utcnow())
         self.db.execute(
-            """UPDATE scan_jobs
-               SET status='CANCELLED', completed_at=?, error_code='CANCELLED', error_message='Cancelled by user'
-               WHERE id=? AND status IN ('PENDING','QUEUED','RUNNING')""",
+            """UPDATE tbl_scan_jobs
+               SET job_status='CANCELLED', completed_at=?, error_code='CANCELLED', error_message='Cancelled by user'
+               WHERE id=? AND job_status IN ('PENDING','QUEUED','RUNNING')""",
             (now, job_id),
         )
         finish(self.db)
@@ -362,10 +379,10 @@ class JobQueue:
     def requeue_failed(self, idempotency_key: str) -> None:
         now = iso(utcnow())
         self.db.execute(
-            """UPDATE scan_jobs
-               SET status='QUEUED', attempts=0, next_attempt_at=?, completed_at=NULL,
+            """UPDATE tbl_scan_jobs
+               SET job_status='QUEUED', attempts=0, next_attempt_at=?, completed_at=NULL,
                    started_at=NULL, error_code='', error_message=''
-               WHERE idempotency_key=? AND status IN ('FAILED','DEAD_LETTER','CANCELLED')""",
+               WHERE idempotency_key=? AND job_status IN ('FAILED','DEAD_LETTER','CANCELLED')""",
             (now, idempotency_key),
         )
         finish(self.db)
@@ -379,7 +396,7 @@ class JobQueue:
             return {}
         marks = ",".join("?" for _ in scan_ids)
         rows = self.db.execute(
-            f"SELECT scan_id, payload FROM scan_jobs WHERE scan_id IN ({marks})",
+            f"SELECT scan_run_id AS scan_id, job_payload AS payload FROM tbl_scan_jobs WHERE scan_run_id IN ({marks})",
             tuple(scan_ids),
         ).fetchall()
         out: dict[str, dict[str, str]] = {}
@@ -400,8 +417,8 @@ class JobQueue:
 
     def get_for_scan(self, scan_id: str) -> dict[str, Any] | None:
         row = self.db.execute(
-            """SELECT id, scan_id, status
-               FROM scan_jobs WHERE scan_id = ? ORDER BY created_at DESC LIMIT 1""",
+            """SELECT id, scan_run_id AS scan_id, job_status AS status
+               FROM tbl_scan_jobs WHERE scan_run_id = ? ORDER BY created_at DESC LIMIT 1""",
             (scan_id,),
         ).fetchone()
         if row is None:
@@ -411,10 +428,10 @@ class JobQueue:
     def requeue(self, job_id: str) -> None:
         now = iso(utcnow())
         self.db.execute(
-            """UPDATE scan_jobs
-               SET status='QUEUED', attempts=0, next_attempt_at=?, completed_at=NULL,
+            """UPDATE tbl_scan_jobs
+               SET job_status='QUEUED', attempts=0, next_attempt_at=?, completed_at=NULL,
                    started_at=NULL, error_code='', error_message=''
-               WHERE id=? AND status IN ('COMPLETED','FAILED','DEAD_LETTER','QUEUED','CANCELLED')""",
+               WHERE id=? AND job_status IN ('COMPLETED','FAILED','DEAD_LETTER','QUEUED','CANCELLED')""",
             (now, job_id),
         )
         finish(self.db)
@@ -435,12 +452,15 @@ class BomRepo:
         try:
             self._drop_prior_snapshots(snap.get("scan_id") or "")
             self.db.execute(
-                """INSERT INTO bom_snapshots (id, organization_id, project_id, application_id,
-                   scan_id, bom_type, application_version, version_strategy,
+                """INSERT INTO tbl_bom_snapshots (
+                   id, security_scans_id, organization_id, project_id, application_id,
+                   scan_run_id, bom_type, application_version, version_strategy,
                    repository_url, repository_branch, commit_sha, commit_author, commit_email,
                    commit_message, scanner_name, scanner_version, bom_format_version,
                    generated_at, raw_metadata)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   SELECT ?, r.security_scans_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                   FROM tbl_scan_runs r
+                   WHERE r.id = ?""",
                 (
                     snap["id"], snap.get("organization_id") or "", snap.get("project_id") or "",
                     snap.get("application_id") or "", snap.get("scan_id") or "", snap.get("bom_type") or "SBOM",
@@ -449,7 +469,7 @@ class BomRepo:
                     snap.get("commit_sha") or "", snap.get("commit_author") or "", snap.get("commit_email") or "",
                     snap.get("commit_message") or "", snap.get("scanner_name") or "", snap.get("scanner_version") or "",
                     snap.get("bom_format_version") or "", iso(snap.get("generated_at")) or iso(utcnow()),
-                    json.dumps(snap.get("raw_metadata") or {}),
+                    json.dumps(snap.get("raw_metadata") or {}), snap.get("scan_id") or "",
                 ),
             )
             now = iso(utcnow())
@@ -463,9 +483,10 @@ class BomRepo:
                 known.add(key)
                 kept.append(comp)
                 self.db.execute(
-                    """INSERT INTO bom_components (id, bom_snapshot_id, name, version, ecosystem,
-                       package_manager, purl, cpe, hash, license, supplier, scope, direct_dependency,
-                       source_manifest, raw, created_at)
+                    """INSERT INTO tbl_bom_components (
+                       id, bom_snapshot_id, component_name, component_version, ecosystem,
+                       package_manager, package_url, cpe, content_hash, license_name, supplier_name,
+                       dependency_scope, is_direct_dependency, source_manifest, raw_component, created_at)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         comp["id"], snap["id"], comp.get("name") or "", comp.get("version") or "",
@@ -482,7 +503,7 @@ class BomRepo:
             ]
             for dep in kept_deps:
                 self.db.execute(
-                    "INSERT INTO bom_dependencies (id, bom_snapshot_id, from_component_id, to_component_id, kind) VALUES (?,?,?,?,?)",
+                    "INSERT INTO tbl_bom_dependencies (id, bom_snapshot_id, from_component_id, to_component_id, dependency_kind) VALUES (?,?,?,?,?)",
                     (dep["id"], snap["id"], dep["from_component_id"], dep["to_component_id"], dep.get("kind") or "runtime"),
                 )
             snap["components"] = kept
@@ -497,19 +518,19 @@ class BomRepo:
     def _drop_prior_snapshots(self, scan_id: str) -> None:
         if not scan_id:
             return
-        rows = self.db.execute("SELECT id FROM bom_snapshots WHERE scan_id = ?", (scan_id,)).fetchall()
+        rows = self.db.execute("SELECT id FROM tbl_bom_snapshots WHERE scan_run_id = ?", (scan_id,)).fetchall()
         for row in rows:
             snapshot_id = row[0]
-            self.db.execute("DELETE FROM exports WHERE snapshot_id = ?", (snapshot_id,))
-            self.db.execute("DELETE FROM bom_dependencies WHERE bom_snapshot_id = ?", (snapshot_id,))
-            self.db.execute("DELETE FROM bom_components WHERE bom_snapshot_id = ?", (snapshot_id,))
-            self.db.execute("DELETE FROM bom_snapshots WHERE id = ?", (snapshot_id,))
+            self.db.execute("DELETE FROM tbl_bom_dependencies WHERE bom_snapshot_id = ?", (snapshot_id,))
+            self.db.execute("DELETE FROM tbl_bom_components WHERE bom_snapshot_id = ?", (snapshot_id,))
+            self.db.execute("UPDATE tbl_scan_runs SET bom_snapshot_id = NULL WHERE bom_snapshot_id = ?", (snapshot_id,))
+            self.db.execute("DELETE FROM tbl_bom_snapshots WHERE id = ?", (snapshot_id,))
 
     def _known_package_keys(self, organization_id: str) -> set[tuple[str, str, str]]:
         rows = self.db.execute(
-            """SELECT lower(c.name), c.version, lower(c.ecosystem)
-               FROM bom_components c
-               JOIN bom_snapshots s ON s.id = c.bom_snapshot_id
+            """SELECT lower(c.component_name), c.component_version, lower(c.ecosystem)
+               FROM tbl_bom_components c
+               JOIN tbl_bom_snapshots s ON s.id = c.bom_snapshot_id
                WHERE s.organization_id = ?""",
             (organization_id,),
         ).fetchall()
@@ -517,12 +538,12 @@ class BomRepo:
 
     def get_snapshot(self, snapshot_id: str) -> dict[str, Any] | None:
         row = self.db.execute(
-            """SELECT id, organization_id, project_id, application_id, scan_id,
+            """SELECT id, organization_id, project_id, application_id, scan_run_id AS scan_id,
                       bom_type, application_version, version_strategy,
                       repository_url, repository_branch, commit_sha, commit_author, commit_email,
                       commit_message, scanner_name, scanner_version, bom_format_version,
                       generated_at, raw_metadata
-               FROM bom_snapshots WHERE id = ?""",
+               FROM tbl_bom_snapshots WHERE id = ?""",
             (snapshot_id,),
         ).fetchone()
         if row is None:
@@ -557,9 +578,11 @@ class BomRepo:
 
     def _components(self, snapshot_id: str) -> list[dict[str, Any]]:
         rows = self.db.execute(
-            """SELECT id, bom_snapshot_id, name, version, ecosystem, package_manager, purl,
-                      cpe, hash, license, supplier, scope, direct_dependency, source_manifest, raw
-               FROM bom_components WHERE bom_snapshot_id = ? ORDER BY ecosystem, name, version""",
+            """SELECT id, bom_snapshot_id, component_name AS name, component_version AS version, ecosystem,
+                      package_manager, package_url AS purl, cpe, content_hash AS hash, license_name AS license,
+                      supplier_name AS supplier, dependency_scope AS scope, is_direct_dependency AS direct_dependency,
+                      source_manifest, raw_component AS raw
+               FROM tbl_bom_components WHERE bom_snapshot_id = ? ORDER BY ecosystem, component_name, component_version""",
             (snapshot_id,),
         ).fetchall()
         out = []
@@ -592,7 +615,8 @@ class BomRepo:
 
     def _deps(self, snapshot_id: str) -> list[dict[str, Any]]:
         rows = self.db.execute(
-            "SELECT id, bom_snapshot_id, from_component_id, to_component_id, kind FROM bom_dependencies WHERE bom_snapshot_id = ?",
+            """SELECT id, bom_snapshot_id, from_component_id, to_component_id, dependency_kind AS kind
+               FROM tbl_bom_dependencies WHERE bom_snapshot_id = ?""",
             (snapshot_id,),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -601,7 +625,7 @@ class BomRepo:
         if limit <= 0 or limit > 500:
             limit = 100
         rows = self.db.execute(
-            "SELECT id FROM bom_snapshots WHERE application_id = ? ORDER BY generated_at DESC LIMIT ?",
+            "SELECT id FROM tbl_bom_snapshots WHERE application_id = ? ORDER BY generated_at DESC LIMIT ?",
             (app_id, limit),
         ).fetchall()
         return [snap for row in rows if (snap := self.get_snapshot(row["id"]))]
@@ -614,7 +638,7 @@ class BomRepo:
         cursor: str | None = None,
     ) -> dict[str, Any]:
         page_size = min(max(int(limit or 200), 1), 500)
-        params: list[Any] = [organization_id, "manual"]
+        params: list[Any] = [organization_id]
         cursor_sql = ""
         if cursor:
             created_at, component_id = _decode_cursor(cursor)
@@ -622,14 +646,15 @@ class BomRepo:
             params.extend([created_at, component_id])
         params.append(page_size + 1)
         rows = self.db.execute(
-            f"""SELECT c.id, c.name, c.version, c.ecosystem, c.purl, c.license, c.supplier,
-                      c.direct_dependency, c.raw, c.package_name, c.field_type, c.risk, c.cve_count,
-                      c.created_at, p.name AS project_name, a.name AS application_name
-               FROM bom_components c
-               JOIN bom_snapshots s ON s.id = c.bom_snapshot_id
-               JOIN projects p ON p.id = s.project_id
-               JOIN applications a ON a.id = s.application_id
-               WHERE c.organization_id = ? AND c.source_manifest = ?
+            f"""SELECT c.id, c.component_name AS name, c.version, c.ecosystem, c.package_url AS purl,
+                      c.license_name AS license, c.supplier_name AS supplier, c.is_direct_dependency AS direct_dependency,
+                      c.package_name, c.component_type AS field_type, c.risk_level AS risk,
+                      c.vulnerability_count AS cve_count, c.source_file_name AS file_name, c.created_by,
+                      c.created_at, p.project_name AS project_name, svc.service_name AS application_name
+               FROM tbl_software_components_and_packages c
+               JOIN tbl_projects_and_microservices p ON p.id = c.project_id
+               JOIN tbl_project_applications_and_services svc ON svc.id = c.service_id
+               WHERE c.organization_id = ?
                {cursor_sql}
                ORDER BY c.created_at DESC, c.id DESC
                LIMIT ?""",
@@ -655,31 +680,25 @@ class BomRepo:
                 self.db.rollback()
             self.db.begin()
             try:
-                self.db.execute(
-                    "INSERT INTO organizations (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING",
-                    (organization_id, organization_id),
+                from app.catalog.store import ensure_software_inventory
+
+                inventory_id = ensure_software_inventory(self.db, organization_id)
+                project_ids = self._upsert_projects(
+                    organization_id, inventory_id, list(dict.fromkeys(item["project"] for item in prepared))
                 )
-                project_ids = self._upsert_projects(organization_id, list(dict.fromkeys(item["project"] for item in prepared)))
                 applications = list(dict.fromkeys((item["project"], item["project_application"]) for item in prepared))
                 application_ids = self._upsert_applications(organization_id, applications, project_ids)
-                snapshot_ids = self._upsert_manual_snapshots(organization_id, applications, project_ids, application_ids, now)
                 component_rows = []
                 for item in prepared:
                     component_id = str(uuid.uuid4())
-                    snapshot_id = snapshot_ids[(project_ids[item["project"]], application_ids[(project_ids[item["project"]], item["project_application"])])]
-                    raw = {
-                        "package_name": item["package_name"],
-                        "field_type": item["field_type"],
-                        "risk": item["risk"],
-                        "cve_count": item["cves"],
-                        "ecosystem": item["ecosystem_label"],
-                    }
+                    project_id = project_ids[item["project"]]
+                    service_id = application_ids[(project_id, item["project_application"])]
                     component_rows.append(
                         (
-                            component_id, snapshot_id, organization_id, item["name"], item["package_name"],
-                            item["version"], item["ecosystem_key"], item["purl"], item["license"], item["supplier"],
-                            item["direct"], item["field_type"], item["risk"], item["cves"], "manual",
-                            json.dumps(raw), now,
+                            component_id, inventory_id, organization_id, project_id, service_id,
+                            item["name"], item["package_name"], item["version"], item["field_type"],
+                            item["file_name"], item["license"], item["purl"], item["ecosystem_key"],
+                            item["risk"], item["cves"], item["direct"], item["supplier"], item["created_by"], now,
                         )
                     )
                     created.append(
@@ -691,6 +710,7 @@ class BomRepo:
                             "project": item["project"],
                             "project_application": item["project_application"],
                             "field_type": item["field_type"],
+                            "file_name": item["file_name"],
                             "license": item["license"],
                             "cves": item["cves"],
                             "purl": item["purl"],
@@ -698,13 +718,16 @@ class BomRepo:
                             "ecosystem": item["ecosystem_label"],
                             "direct": item["direct"],
                             "supplier": item["supplier"],
+                            "created_by": item["created_by"],
                         }
                     )
                 self.db.executemany(
-                    """INSERT INTO bom_components (id, bom_snapshot_id, organization_id, name, package_name,
-                       version, ecosystem, purl, license, supplier, direct_dependency, field_type, risk,
-                       cve_count, source_manifest, raw, created_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    """INSERT INTO tbl_software_components_and_packages (
+                       id, software_inventory_id, organization_id, project_id, service_id,
+                       component_name, package_name, version, component_type, source_file_name,
+                       license_name, package_url, ecosystem, risk_level, vulnerability_count,
+                       is_direct_dependency, supplier_name, created_by, created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     component_rows,
                 )
                 self.db.commit()
@@ -714,15 +737,16 @@ class BomRepo:
                 raise
         return created
 
-    def _upsert_projects(self, organization_id: str, names: list[str]) -> dict[str, str]:
+    def _upsert_projects(self, organization_id: str, inventory_id: str, names: list[str]) -> dict[str, str]:
         _insert_ignore(
             self.db,
-            "INSERT INTO projects (id, organization_id, name)",
-            "ON CONFLICT (organization_id, name) DO NOTHING",
-            [(str(uuid.uuid4()), organization_id, name) for name in names],
+            "INSERT INTO tbl_projects_and_microservices (id, software_inventory_id, organization_id, project_name)",
+            "ON CONFLICT (organization_id, project_name) DO NOTHING",
+            [(str(uuid.uuid4()), inventory_id, organization_id, name) for name in names],
         )
         rows = self.db.execute(
-            "SELECT id, name FROM projects WHERE organization_id = ? AND name = ANY(?)",
+            """SELECT id, project_name AS name FROM tbl_projects_and_microservices
+               WHERE organization_id = ? AND project_name = ANY(?)""",
             (organization_id, names),
         ).fetchall()
         return {row["name"]: row["id"] for row in rows}
@@ -739,53 +763,17 @@ class BomRepo:
         ]
         _insert_ignore(
             self.db,
-            "INSERT INTO applications (id, organization_id, project_id, name)",
-            "ON CONFLICT (organization_id, project_id, name) DO NOTHING",
-            rows,
+            "INSERT INTO tbl_project_applications_and_services (id, project_id, organization_id, service_name)",
+            "ON CONFLICT (organization_id, project_id, service_name) DO NOTHING",
+            [(row[0], row[2], row[1], row[3]) for row in rows],
         )
         found = self.db.execute(
-            """SELECT id, project_id, name FROM applications
+            """SELECT id, project_id, service_name AS name FROM tbl_project_applications_and_services
                WHERE organization_id = ? AND project_id = ANY(?)""",
             (organization_id, list({row[2] for row in rows})),
         ).fetchall()
         wanted = {(project_ids[project], name) for project, name in applications}
         return {(row["project_id"], row["name"]): row["id"] for row in found if (row["project_id"], row["name"]) in wanted}
-
-    def _upsert_manual_snapshots(
-        self,
-        organization_id: str,
-        applications: list[tuple[str, str]],
-        project_ids: dict[str, str],
-        application_ids: dict[tuple[str, str], str],
-        now: str,
-    ) -> dict[tuple[str, str], str]:
-        rows = []
-        for project, name in applications:
-            project_id = project_ids[project]
-            application_id = application_ids[(project_id, name)]
-            rows.append(
-                (
-                    str(uuid.uuid4()), organization_id, project_id, application_id, "", "SBOM", "", "MANUAL",
-                    "", "", "", "", "", "", _MANUAL_SCANNER, "1", "", now, "{}",
-                )
-            )
-        _insert_ignore(
-            self.db,
-            """INSERT INTO bom_snapshots (id, organization_id, project_id, application_id,
-               scan_id, bom_type, application_version, version_strategy,
-               repository_url, repository_branch, commit_sha, commit_author, commit_email,
-               commit_message, scanner_name, scanner_version, bom_format_version,
-               generated_at, raw_metadata)""",
-            "ON CONFLICT (organization_id, project_id, application_id) WHERE scanner_name = 'manual' DO NOTHING",
-            rows,
-        )
-        project_id_list = list({project_ids[project] for project, _ in applications})
-        found = self.db.execute(
-            """SELECT id, project_id, application_id FROM bom_snapshots
-               WHERE organization_id = ? AND scanner_name = ? AND project_id = ANY(?)""",
-            (organization_id, _MANUAL_SCANNER, project_id_list),
-        ).fetchall()
-        return {(row["project_id"], row["application_id"]): row["id"] for row in found}
 
 
 def _prepare_inventory_component(item: dict[str, Any]) -> dict[str, Any]:
@@ -808,6 +796,8 @@ def _prepare_inventory_component(item: dict[str, Any]) -> dict[str, Any]:
     license_name = _clip(item.get("license"), 200) or "Unknown"
     purl = _clip(item.get("purl"), 1000) or f"pkg:{ecosystem_key}/{package_name}@{version}"
     supplier = _clip(item.get("supplier"), 300) or "Registered Software Component"
+    file_name = _clip(item.get("file_name") or item.get("fileName"), 300)
+    created_by = _clip(item.get("created_by") or item.get("createdBy"), 200)
     cves = _cve_count(item.get("cves"))
     direct = item.get("direct_dependency")
     if direct is None:
@@ -829,6 +819,8 @@ def _prepare_inventory_component(item: dict[str, Any]) -> dict[str, Any]:
         "ecosystem_label": ecosystem_label,
         "direct": bool(direct),
         "supplier": supplier,
+        "file_name": file_name,
+        "created_by": created_by,
     }
 
 
@@ -855,34 +847,28 @@ def _decode_cursor(cursor: str) -> tuple[str, str]:
 
 
 def _inventory_component(row) -> dict[str, Any]:
-    raw = json.loads(row["raw"]) if row["raw"] else {}
-    if not isinstance(raw, dict):
-        raw = {}
-    ecosystem = raw.get("ecosystem") or _ECOSYSTEM_LABELS.get(str(row["ecosystem"] or "").lower(), "npm")
+    ecosystem = _ECOSYSTEM_LABELS.get(str(row["ecosystem"] or "").lower(), row["ecosystem"] or "npm")
     try:
         cves = int(row["cve_count"] or 0)
     except (TypeError, ValueError, KeyError):
         cves = 0
-    if cves == 0:
-        try:
-            cves = int(raw.get("cve_count") or 0)
-        except (TypeError, ValueError):
-            cves = 0
     return {
         "id": row["id"],
         "name": row["name"],
-        "package_name": row["package_name"] or raw.get("package_name") or row["name"],
+        "package_name": row["package_name"] or row["name"],
         "version": row["version"],
         "project": row["project_name"],
         "project_application": row["application_name"],
-        "field_type": row["field_type"] or raw.get("field_type") or "Library",
+        "field_type": row["field_type"] or "Library",
+        "file_name": row["file_name"] or "",
         "license": row["license"] or "Unknown",
         "cves": cves,
         "purl": row["purl"] or "",
-        "risk": row["risk"] or raw.get("risk") or "Safe",
+        "risk": row["risk"] or "Safe",
         "ecosystem": ecosystem,
         "direct": bool(row["direct_dependency"]),
         "supplier": row["supplier"] or "",
+        "created_by": row["created_by"] or "",
     }
 
 

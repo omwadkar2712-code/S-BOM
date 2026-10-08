@@ -30,6 +30,55 @@ class BoundTarget:
     application_name: str
 
 
+def ensure_security_scans(db, organization_id: str) -> str:
+    """Create the organization and its single security-scans record, then return that id."""
+    organization_id = (organization_id or "").strip()
+    if not organization_id:
+        raise CatalogError("INVALID_INPUT", "organization is required", 400)
+    db.execute(
+        "INSERT INTO tbl_organizations (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING",
+        (organization_id, organization_id),
+    )
+    db.execute(
+        """INSERT INTO tbl_security_scans (id, organization_id, display_name)
+           VALUES (?, ?, ?)
+           ON CONFLICT (organization_id) DO NOTHING""",
+        (str(uuid.uuid4()), organization_id, "Security scans"),
+    )
+    row = db.execute(
+        "SELECT id FROM tbl_security_scans WHERE organization_id = ?",
+        (organization_id,),
+    ).fetchone()
+    if row is None:
+        raise CatalogError("CREATE_FAILED", "security scans record could not be saved", 500)
+    finish(db)
+    return row["id"]
+
+
+def ensure_software_inventory(db, organization_id: str) -> str:
+    """Create the organization and its single software inventory, then return the inventory id."""
+    organization_id = (organization_id or "").strip()
+    if not organization_id:
+        raise CatalogError("INVALID_INPUT", "organization is required", 400)
+    db.execute(
+        "INSERT INTO tbl_organizations (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING",
+        (organization_id, organization_id),
+    )
+    db.execute(
+        """INSERT INTO tbl_software_inventory (id, organization_id, display_name)
+           VALUES (?, ?, ?)
+           ON CONFLICT (organization_id) DO NOTHING""",
+        (str(uuid.uuid4()), organization_id, "Software inventory"),
+    )
+    row = db.execute(
+        "SELECT id FROM tbl_software_inventory WHERE organization_id = ?",
+        (organization_id,),
+    ).fetchone()
+    if row is None:
+        raise CatalogError("CREATE_FAILED", "software inventory could not be saved", 500)
+    return row["id"]
+
+
 class CatalogRepo:
     def __init__(self, db) -> None:
         self.db = db
@@ -40,17 +89,17 @@ class CatalogRepo:
         params: list[Any] = [organization_id]
         filters = "organization_id = ?"
         if query:
-            filters += " AND name ILIKE ? ESCAPE '#'"
+            filters += " AND project_name ILIKE ? ESCAPE '#'"
             params.append(_ilike_contains(query))
         if cursor:
             name, record_id = _decode_cursor(cursor)
-            filters += " AND (name, id) > (?, ?)"
+            filters += " AND (project_name, id) > (?, ?)"
             params.extend([name, record_id])
         params.append(page_size + 1)
         rows = self.db.execute(
-            f"""SELECT id, name FROM projects
+            f"""SELECT id, project_name AS name FROM tbl_projects_and_microservices
                WHERE {filters}
-               ORDER BY name ASC, id ASC
+               ORDER BY project_name ASC, id ASC
                LIMIT ?""",
             params,
         ).fetchall()
@@ -73,17 +122,17 @@ class CatalogRepo:
         params: list[Any] = [organization_id, project["id"]]
         filters = "organization_id = ? AND project_id = ?"
         if query:
-            filters += " AND name ILIKE ? ESCAPE '#'"
+            filters += " AND service_name ILIKE ? ESCAPE '#'"
             params.append(_ilike_contains(query))
         if cursor:
             name, record_id = _decode_cursor(cursor)
-            filters += " AND (name, id) > (?, ?)"
+            filters += " AND (service_name, id) > (?, ?)"
             params.extend([name, record_id])
         params.append(page_size + 1)
         rows = self.db.execute(
-            f"""SELECT id, name, project_id FROM applications
+            f"""SELECT id, service_name AS name, project_id FROM tbl_project_applications_and_services
                WHERE {filters}
-               ORDER BY name ASC, id ASC
+               ORDER BY service_name ASC, id ASC
                LIMIT ?""",
             params,
         ).fetchall()
@@ -98,7 +147,7 @@ class CatalogRepo:
         if not record_id:
             return None
         row = self.db.execute(
-            "SELECT id, name FROM projects WHERE organization_id = ? AND id = ?",
+            "SELECT id, project_name AS name FROM tbl_projects_and_microservices WHERE organization_id = ? AND id = ?",
             (organization_id, record_id),
         ).fetchone()
         return {"id": row["id"], "name": row["name"]} if row else None
@@ -108,7 +157,7 @@ class CatalogRepo:
         if not record_id:
             return None
         row = self.db.execute(
-            """SELECT id, name, project_id FROM applications
+            """SELECT id, service_name AS name, project_id FROM tbl_project_applications_and_services
                WHERE organization_id = ? AND id = ?""",
             (organization_id, record_id),
         ).fetchone()
@@ -119,7 +168,7 @@ class CatalogRepo:
         if not label:
             return None
         row = self.db.execute(
-            "SELECT id, name FROM projects WHERE organization_id = ? AND name = ?",
+            "SELECT id, project_name AS name FROM tbl_projects_and_microservices WHERE organization_id = ? AND project_name = ?",
             (organization_id, label),
         ).fetchone()
         return {"id": row["id"], "name": row["name"]} if row else None
@@ -129,8 +178,8 @@ class CatalogRepo:
         if not project_id or not label:
             return None
         row = self.db.execute(
-            """SELECT id, name, project_id FROM applications
-               WHERE organization_id = ? AND project_id = ? AND name = ?""",
+            """SELECT id, service_name AS name, project_id FROM tbl_project_applications_and_services
+               WHERE organization_id = ? AND project_id = ? AND service_name = ?""",
             (organization_id, project_id, label),
         ).fetchone()
         return {"id": row["id"], "name": row["name"], "project_id": row["project_id"]} if row else None
@@ -140,10 +189,11 @@ class CatalogRepo:
         existing = self.find_project_by_name(organization_id, label)
         if existing:
             return existing
+        inventory_id = ensure_software_inventory(self.db, organization_id)
         self.db.execute(
-            """INSERT INTO projects (id, organization_id, name)
-               VALUES (?,?,?) ON CONFLICT (organization_id, name) DO NOTHING""",
-            (str(uuid.uuid4()), organization_id, label),
+            """INSERT INTO tbl_projects_and_microservices (id, software_inventory_id, organization_id, project_name)
+               VALUES (?,?,?,?) ON CONFLICT (organization_id, project_name) DO NOTHING""",
+            (str(uuid.uuid4()), inventory_id, organization_id, label),
         )
         finish(self.db)
         found = self.find_project_by_name(organization_id, label)
@@ -160,9 +210,9 @@ class CatalogRepo:
         if existing:
             return existing
         self.db.execute(
-            """INSERT INTO applications (id, organization_id, project_id, name)
-               VALUES (?,?,?,?) ON CONFLICT (organization_id, project_id, name) DO NOTHING""",
-            (str(uuid.uuid4()), organization_id, project["id"], label),
+            """INSERT INTO tbl_project_applications_and_services (id, project_id, organization_id, service_name)
+               VALUES (?,?,?,?) ON CONFLICT (organization_id, project_id, service_name) DO NOTHING""",
+            (str(uuid.uuid4()), project["id"], organization_id, label),
         )
         finish(self.db)
         found = self.find_application(organization_id, project["id"], label)

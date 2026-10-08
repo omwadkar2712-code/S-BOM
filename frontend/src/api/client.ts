@@ -126,6 +126,8 @@ export interface ApiInventoryComponent {
   ecosystem: Ecosystem;
   direct: boolean;
   supplier: string;
+  file_name?: string;
+  created_by?: string;
 }
 
 export interface InventoryComponentInput {
@@ -144,6 +146,8 @@ export interface InventoryComponentInput {
   purl?: string;
   direct_dependency?: boolean;
   supplier?: string;
+  file_name?: string;
+  created_by?: string;
 }
 
 export interface CatalogRecord {
@@ -243,6 +247,8 @@ export function mapInventoryComponent(row: ApiInventoryComponent): SBOMComponent
     directDependency: Boolean(row.direct),
     supplier: row.supplier || '',
     purl: row.purl,
+    fileName: row.file_name || undefined,
+    createdBy: row.created_by || undefined,
     compliance: 95,
   };
 }

@@ -224,13 +224,17 @@ def migrate(db: Database) -> None:
 
 
 def _statements(sql: str) -> list[str]:
+    """Split SQL on semicolons, keeping dollar-quoted blocks intact."""
     parts: list[str] = []
     buf: list[str] = []
+    in_dollar = False
     for line in sql.splitlines():
-        if line.strip().startswith("--"):
+        if not in_dollar and line.strip().startswith("--"):
             continue
         buf.append(line)
-        if line.strip().endswith(";"):
+        if line.count("$$") % 2 == 1:
+            in_dollar = not in_dollar
+        if not in_dollar and line.strip().endswith(";"):
             statement = "\n".join(buf).strip().rstrip(";").strip()
             if statement:
                 parts.append(statement)

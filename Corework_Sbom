@@ -1,0 +1,462 @@
+# How S-BOM Scans Projects & Finds Vulnerabilities
+
+> A complete walkthrough of how your code goes from a folder on disk to a list of CVEs with risk scores.
+
+---
+
+## The Big Picture (30-Second Summary)
+
+```mermaid
+flowchart LR
+    A["📁 Your Project Folder"] --> B["🔍 Find Manifest Files"]
+    B --> C["📋 Extract Package List"]
+    C --> D["🌐 Ask OSV: Any known bugs?"]
+    D --> E["🏛️ Ask MITRE/NVD: How bad is it?"]
+    E --> F["⚠️ CVE List + Risk Score"]
+```
+
+**In plain English:** The scanner looks at your project folder, finds files like `package.json` or `requirements.txt`, reads the list of libraries you use, then checks online databases to see if any of those libraries have known security bugs (CVEs). For each bug found, it fetches a severity score (CVSS) and tells you how dangerous it is.
+
+---
+
+## Phase 1: How Does the Scan Start?
+
+There are **three ways** a scan can begin:
+
+| Trigger | What Happens | Code |
+| :--- | :--- | :--- |
+| **Local Upload** | User uploads a zip, folder, or single manifest file from the UI | [server.py `/api/v1/scans/local`](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/api/server.py#L134-L229) |
+| **GitHub Repository** | User pastes a GitHub URL; the backend clones the repo | [server.py `/api/v1/scans/github`](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/api/server.py#L231-L285) |
+| **GitHub Webhook** | A `push` or `release` event auto-triggers a scan | [server.py `/api/v1/github/webhooks`](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/api/server.py#L652-L710) |
+
+In all three cases, the request ends up at [Orchestrator.create_scan()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scans/orchestrator.py#L63-L120) which:
+
+1. Creates a **scan record** in the database (status = `PENDING`)
+2. Puts a **job** into a queue
+3. A background **worker** picks up the job and calls [Orchestrator.execute()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scans/orchestrator.py#L166-L251)
+
+Think of it like ordering food at a restaurant — you place the order (create scan), it goes to the kitchen queue (job queue), and a chef picks it up (worker executes).
+
+---
+
+## Phase 2: Crawling the Project Tree
+
+**File:** [detector.py](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scanner/detector.py)
+
+Once the worker has a folder to scan, the very first thing it does is **walk through every file and subfolder**, looking for files it recognizes.
+
+### What it looks for
+
+The scanner has a built-in dictionary of ~46 known manifest filenames. Here are the key ones:
+
+| Filename | Language | Ecosystem |
+| :--- | :--- | :--- |
+| `package.json` | JavaScript | npm |
+| `package-lock.json` | JavaScript | npm |
+| `yarn.lock` | JavaScript | npm |
+| `pnpm-lock.yaml` | JavaScript | npm |
+| `requirements.txt` | Python | PyPI |
+| `Pipfile.lock` | Python | PyPI |
+| `poetry.lock` | Python | PyPI |
+| `pyproject.toml` | Python | PyPI |
+| `pom.xml` | Java | Maven |
+| `build.gradle` | Java/Kotlin | Maven |
+| `go.mod` / `go.sum` | Go | Go |
+| `Cargo.toml` / `Cargo.lock` | Rust | crates.io |
+| `Gemfile` / `Gemfile.lock` | Ruby | RubyGems |
+| `composer.json` / `composer.lock` | PHP | Packagist |
+| `*.csproj` / `packages.lock.json` | C# / .NET | NuGet |
+| `pubspec.yaml` | Dart/Flutter | Pub |
+| `Package.swift` | Swift | SwiftURL |
+
+### What it skips
+
+The scanner is smart about **not** scanning junk folders:
+
+```
+Always ignored: .git, .svn, __pycache__, dist, target, build, .idea, .vscode, bin, obj, .next
+Also ignored:   node_modules, venv, .venv, vendor  (installed dependencies)
+```
+
+> **Why skip `node_modules`?** Because `node_modules` contains the *installed* copies of packages. The scanner cares about what's *declared* in your manifest files — that's the source of truth for what versions you intend to use.
+
+### Safety limits
+
+- Max file size: **64 MB** per manifest (oversized files are skipped)
+- Max scan units: **20,000** files (prevents runaway scans on massive monorepos)
+- Max directory depth: **30 levels** deep
+
+### The output
+
+For each recognized file, the scanner produces a `Detected` record:
+
+```python
+Detected(
+    kind="NODE_NPM_LOCK",        # What type of manifest
+    path=Path("/app/package-lock.json"),
+    rel="package-lock.json",     # Relative path from project root
+    ecosystem="npm",             # Which package registry
+    priority=5                   # Higher = more trustworthy (lockfiles > manifests)
+)
+```
+
+> **Priority matters:** A lockfile like `package-lock.json` (priority 5) contains exact pinned versions (`1.2.3`), while `package.json` (priority 1) may only have ranges (`^1.2.0`). The scanner prefers lockfile data when both exist.
+
+---
+
+## Phase 3: Parsing Manifests Into Components
+
+**File:** [parsers.py](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scanner/parsers.py) (~53 KB, the largest file in the scanner)
+
+Each manifest type has its own parser. Here's what happens for different ecosystems:
+
+### Example: `package-lock.json` (npm)
+
+```json
+{
+  "packages": {
+    "node_modules/axios": {
+      "version": "0.21.1",
+      "resolved": "https://registry.npmjs.org/axios/-/axios-0.21.1.tgz",
+      "integrity": "sha512-..."
+    },
+    "node_modules/lodash": {
+      "version": "4.17.20"
+    }
+  }
+}
+```
+
+The parser reads each entry and extracts:
+- **Name:** `axios`
+- **Version:** `0.21.1`
+- **Ecosystem:** `npm`
+- **PURL (Package URL):** `pkg:npm/axios@0.21.1`
+- **Hash/Integrity:** `sha512-...`
+- **Direct vs Transitive:** Is it in `dependencies` (direct) or just in `packages` (transitive)?
+
+### Example: `requirements.txt` (Python)
+
+```
+Flask==2.0.1
+requests>=2.25.0,<3.0
+numpy~=1.21.0
+```
+
+The parser handles version constraints:
+- `Flask==2.0.1` → exact version `2.0.1`
+- `requests>=2.25.0` → normalized to `2.25.0` for vulnerability lookup
+- `numpy~=1.21.0` → normalized to `1.21.0`
+
+### Version Normalization
+
+This is a crucial step handled by [query_version()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/vulnerabilities/provider.py#L272-L300). Real-world manifests contain messy version strings:
+
+```
+^1.2.3    → 1.2.3     (strip the caret)
+~2.0.0    → 2.0.0     (strip the tilde)
+>=3.1.0   → 3.1.0     (strip the operator)
+1.x       → 1.0       (replace wildcard)
+[1.0,2.0) → 1.0       (take lower bound of range)
+*         → (empty)   (skip, can't query "any version")
+git+https://... → (skip, not a registry package)
+```
+
+> **Why is this needed?** Vulnerability databases need a concrete version number to check against their affected-version ranges. You can't ask "is `>=2.25.0` vulnerable?" — you need to ask "is `2.25.0` vulnerable?"
+
+---
+
+## Phase 4: Deduplication & Dependency Graph
+
+**File:** [pipeline.py](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scanner/pipeline.py)
+
+### Deduplication ([dedupe()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scanner/pipeline.py#L71-L101))
+
+A project might have multiple manifests that list the same package. For example:
+- `package.json` says `lodash: ^4.17.0`
+- `package-lock.json` says `lodash: 4.17.21`
+
+The deduplicator:
+1. Groups components by `(name, version, ecosystem)`
+2. Merges metadata from duplicates (license, supplier, hash)
+3. Prefers the **resolved version** from lockfiles over the range from manifests
+
+### Dependency Graph ([apply_graph()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scanner/pipeline.py#L173-L214))
+
+The scanner builds a **dependency tree** using a depth-first search:
+
+```
+Your App (depth 0)
+├── express@4.18.2 (depth 1, DIRECT)
+│   ├── body-parser@1.20.1 (depth 2, TRANSITIVE)
+│   │   └── raw-body@2.5.1 (depth 3, TRANSITIVE)
+│   └── cookie@0.5.0 (depth 2, TRANSITIVE)
+└── axios@0.21.1 (depth 1, DIRECT)
+    └── follow-redirects@1.14.0 (depth 2, TRANSITIVE)
+```
+
+- **Direct dependencies** (depth 1): Packages YOU chose to install. These are in your direct control.
+- **Transitive dependencies** (depth 2+): Packages that your dependencies depend on. You didn't choose these — they came along for the ride.
+
+> **Why does this matter for risk?** A critical CVE in a **direct** dependency is more dangerous because it's closer to your application's surface area. A CVE buried 5 levels deep in a transitive dependency *might* not even be reachable by your code. This is why the risk formula uses a `ScopeMultiplier`.
+
+---
+
+## Phase 5: Enrichment & Compliance
+
+Still in [pipeline.py](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scanner/pipeline.py):
+
+### Local Enrichment ([enrich_local()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scanner/pipeline.py#L217-L252))
+
+The scanner does extra work to fill in gaps:
+
+1. **License Detection**: If a package doesn't declare its license, the scanner looks for `LICENSE`, `LICENSE.md`, `COPYING`, or `NOTICE` files in the package directory and reads them to identify `MIT`, `Apache-2.0`, `GPL-3.0`, or `BSD-3-Clause`.
+
+2. **PURL Generation**: If a package doesn't have a Package URL, one is constructed: `pkg:{ecosystem}/{name}@{version}`
+
+3. **Hash Collection**: Integrity hashes (`SHA-256`, `SHA-512`, `SHA-1`, `MD5`) are collected from lockfiles for supply-chain verification.
+
+### NTIA Compliance Audit ([audit_compliance()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/scanner/pipeline.py#L255-L273))
+
+Every component is checked against the **NTIA Minimum Elements** for a valid SBOM:
+
+| Check | What It Means | Pass if... |
+| :--- | :--- | :--- |
+| `ntia_supplier` | Who made this package? | Has a supplier name (not `NOASSERTION`) |
+| `ntia_name` | What is it called? | Has a name |
+| `ntia_version` | What version? | Has a version |
+| `ntia_identifier` | Unique ID? | Has a PURL or CPE |
+| `ntia_relationship` | How is it connected? | Is marked direct or appears in dependency graph |
+| `ntia_author` | Who created the SBOM? | Scanner name is present |
+| `ntia_timestamp` | When was it generated? | Timestamp is present |
+
+A component **passes compliance** only if ALL seven checks are true.
+
+---
+
+## Phase 6: Vulnerability Discovery — The Core of CVE Matching
+
+**File:** [provider.py](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/vulnerabilities/provider.py)
+
+This is where CVEs are actually found. The system supports two vulnerability provider modes: **OSV** (default) and **MITRE** (enriched).
+
+### Step 6a: Batch Query to OSV
+
+The scanner takes every extracted component and asks **Google's OSV database** (Open Source Vulnerabilities):
+
+> "Hey OSV, I'm using `axios` version `0.21.1` in the `npm` ecosystem. Do you know of any security bugs?"
+
+**How the API call works** ([_query_batch()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/vulnerabilities/provider.py#L65-L73)):
+
+```
+POST https://api.osv.dev/v1/querybatch
+
+Body: {
+  "queries": [
+    { "package": {"name": "axios", "ecosystem": "npm"}, "version": "0.21.1" },
+    { "package": {"name": "lodash", "ecosystem": "npm"}, "version": "4.17.20" },
+    { "package": {"name": "flask", "ecosystem": "PyPI"}, "version": "2.0.1" },
+    ... up to 500 packages per batch
+  ]
+}
+```
+
+### Step 6b: How OSV Decides If Your Version Is Vulnerable
+
+OSV stores vulnerability records with **affected version ranges**. Here's a real-world example:
+
+```json
+{
+  "id": "GHSA-42xw-2xvc-cxqx",
+  "aliases": ["CVE-2021-3749"],
+  "summary": "Inefficient Regular Expression Complexity in axios",
+  "affected": [{
+    "package": { "name": "axios", "ecosystem": "npm" },
+    "ranges": [{
+      "type": "SEMVER",
+      "events": [
+        { "introduced": "0" },
+        { "fixed": "0.21.2" }
+      ]
+    }]
+  }]
+}
+```
+
+**The matching logic is simple:**
+
+```
+Is your version >= "introduced" (0) AND < "fixed" (0.21.2)?
+
+  axios@0.21.1:  0 <= 0.21.1 < 0.21.2  →  ✅ YES, VULNERABLE
+  axios@0.21.2:  0 <= 0.21.2 < 0.21.2  →  ❌ NO, this IS the fix
+  axios@1.4.0:   0 <= 1.4.0  < 0.21.2  →  ❌ NO, newer than fix
+```
+
+> **Key insight:** The vulnerability database doesn't scan your code for bugs. It simply checks: "Is the version number you're using within a range that is known to contain a specific bug?"
+
+### Step 6c: MITRE/NVD Enrichment (Fetching the Full CVE Record)
+
+OSV gives us the **CVE identifier** (like `CVE-2021-3749`), but for the full technical details, the scanner queries MITRE:
+
+```
+GET https://cveawg.mitre.org/api/cve/CVE-2021-3749
+```
+
+From the MITRE response, [_parse_mitre()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/vulnerabilities/provider.py#L348-L379) extracts:
+
+| Field | Example | What It Means |
+| :--- | :--- | :--- |
+| **CVSS Base Score** | `7.5` | How technically severe (0–10) |
+| **CVSS Vector** | `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H` | Breakdown of attack characteristics |
+| **Base Severity** | `HIGH` | Human-readable severity label |
+| **Description** | "axios before 0.21.2 allows ReDoS..." | What the bug actually does |
+| **Fixed Version** | `0.21.2` | What version to upgrade to |
+| **References** | NVD links, GitHub advisories | Further reading |
+
+### Step 6d: The Final Vulnerability Record
+
+For each match, a record is created and attached to both the component and the snapshot:
+
+```python
+record = {
+    "component_id": "uuid-of-axios-component",
+    "vulnerability_id": "CVE-2021-3749",
+    "source": "mitre",
+    "severity": "HIGH",
+    "cvss_score": 7.5,
+    "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+    "description": "axios before 0.21.2 allows ReDoS...",
+    "fixed_version": "0.21.2",
+}
+```
+
+---
+
+## Phase 7: Risk Score Calculation
+
+Now that we have all the CVEs, here's how risk scores are computed at each level:
+
+### Component Level
+
+In [AppStateContext.tsx](file:///d:/Work_Stuff/Projects/S-BOM/frontend/src/context/AppStateContext.tsx#L70-L83), each component gets the **worst-case** risk:
+
+```
+Component has CVE with CVSS 9.8 (Critical) + CVE with CVSS 4.3 (Medium)
+→ Component Risk = Critical (highest wins)
+```
+
+| Highest CVE Severity | Component Risk Label |
+| :--- | :--- |
+| None | **Safe** |
+| Low ($0.1 - 3.9$) | **Low** |
+| Medium ($4.0 - 6.9$) | **Medium** |
+| High ($7.0 - 8.9$) | **High** |
+| Critical ($9.0 - 10.0$) | **Critical** |
+
+### Project Level
+
+In [dashboard.py `_risk()`](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/projects/dashboard.py#L198-L203):
+
+```python
+if any_critical_cves:     → "High Risk"       (🔴 red badge)
+if any_high_cves or total_cves >= 5:  → "Needs Attention" (🟡 amber badge)
+otherwise:                → "Healthy"          (🟢 green badge)
+```
+
+### Executive Risk Index (0–10 Score)
+
+The composite formula displayed on the dashboard and documented in [Policies.tsx](file:///d:/Work_Stuff/Projects/S-BOM/frontend/src/pages/compliance/Policies.tsx#L108-L116):
+
+```
+RiskIndex = min(10.0, Σ[CVSS × (1.0 + EPSS) × ScopeMultiplier] / log₂(TotalComponents + 2))
+```
+
+**Breaking this down with a real example:**
+
+Imagine a project with 100 components and 3 vulnerabilities:
+
+| CVE | CVSS | EPSS | Scope | Weighted Score |
+| :--- | :---: | :---: | :---: | :---: |
+| CVE-2021-3749 | 7.5 | 0.15 | 1.0 (direct) | 7.5 × 1.15 × 1.0 = **8.625** |
+| CVE-2023-1234 | 9.8 | 0.85 | 1.0 (direct) | 9.8 × 1.85 × 1.0 = **18.13** |
+| CVE-2022-5678 | 4.3 | 0.02 | 0.5 (transitive) | 4.3 × 1.02 × 0.5 = **2.193** |
+
+```
+Sum = 8.625 + 18.13 + 2.193 = 28.948
+Divisor = log₂(100 + 2) = log₂(102) ≈ 6.67
+RiskIndex = min(10.0, 28.948 / 6.67) = min(10.0, 4.34) = 4.34
+```
+
+> **Why divide by log₂(TotalComponents)?** So that a massive project with 5000 components and 3 CVEs doesn't get the same score as a tiny project with 10 components and 3 CVEs. The big project has more dilution.
+
+> **Why multiply by (1 + EPSS)?** EPSS measures real-world exploit activity. A CVE with EPSS of 0.85 means there's an 85% chance of active exploitation — that should weigh much more heavily than a theoretical vulnerability nobody is actually exploiting.
+
+---
+
+## Phase 8: What Gets Stored & Displayed
+
+### The Snapshot (Database)
+
+Everything is saved as a **BOM Snapshot** via [BomRepo.save_snapshot()](file:///d:/Work_Stuff/Projects/S-BOM/backend/app/repositories/store.py):
+
+```
+bom_snapshots table
+├── id, organization_id, project_id, scan_id
+├── scanner_name, scanner_version
+├── generated_at
+├── raw_metadata (JSON blob containing vulnerability_matches[])
+│
+bom_components table (one row per package)
+├── name, version, ecosystem, purl, license, supplier
+├── direct_dependency (true/false)
+├── risk ("Safe" | "Low" | "Medium" | "High" | "Critical")
+├── cve_count (integer)
+└── raw (JSON blob with compliance_status, vulnerabilities[], hashes, depth)
+```
+
+### The Frontend Display
+
+The API serves this data through several endpoints consumed by the UI:
+
+| Endpoint | Returns | Used By |
+| :--- | :--- | :--- |
+| `GET /api/v1/scans/{id}/components` | All packages found | Software Inventory page |
+| `GET /api/v1/scans/{id}/vulnerabilities` | All CVE matches | Vulnerability Triage page |
+| `GET /api/v1/projects` | Project risk summaries | Projects & Dashboard |
+
+---
+
+## Complete Flow Diagram
+
+```mermaid
+flowchart TD
+    A["👤 User uploads folder/zip\nor provides GitHub URL"] --> B["📦 Orchestrator creates\nscan job in queue"]
+    B --> C["⚙️ Worker picks up job"]
+    C --> D["📂 detector.py walks\nthe directory tree"]
+    D --> E["🔎 Finds package.json,\nrequirements.txt, go.mod, etc."]
+    E --> F["📋 parsers.py reads each\nmanifest and extracts\nname + version + ecosystem"]
+    F --> G["🔗 pipeline.py deduplicates\nand builds dependency graph\n(direct vs transitive)"]
+    G --> H["📜 Enriches with license,\nPURL, hashes, compliance"]
+    H --> I["🌐 provider.py sends packages\nto OSV API in batches of 500"]
+    I --> J{"OSV checks:\nis your version in a\nknown vulnerable range?"}
+    J -->|"Yes ✅"| K["Returns CVE IDs\ne.g. CVE-2021-3749"]
+    J -->|"No ❌"| L["Package is clean\nno CVEs found"]
+    K --> M["🏛️ Queries MITRE/NVD\nfor full CVE details:\nCVSS score, description,\nfix version"]
+    M --> N["📊 Attaches CVE records\nto each component"]
+    N --> O["💾 Saves complete snapshot\nto database"]
+    O --> P["📈 Dashboard computes\nproject risk score"]
+    L --> O
+```
+
+---
+
+## Summary: The Key Insight
+
+> **The scanner does NOT look at your source code for bugs.** It doesn't analyze your JavaScript, Python, or Java files for vulnerabilities.
+>
+> Instead, it reads your **dependency manifest files** to build a list of third-party packages you use, then checks each package's **name + version** against public vulnerability databases (OSV, MITRE/NVD) that maintain records of known security bugs.
+>
+> If the version you're using falls within a **known affected range**, that CVE is flagged against your project. The severity (CVSS score) comes from the official CVE record, not from any analysis of your code.
+
+This is called **Software Composition Analysis (SCA)** — it's about understanding the **composition** of your software (what third-party code you're shipping) rather than analyzing the code you wrote yourself.

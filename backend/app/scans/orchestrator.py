@@ -67,7 +67,7 @@ class Orchestrator:
             raise RuntimeError(f"unsupported bom_type: {bom_type}")
         if source_type not in ("LOCAL", "GITHUB"):
             raise RuntimeError(f"unsupported source_type: {source_type}")
-        key = idempotency_key(data, self.cfg.scanner_name, self.cfg.scanner_version)
+        key = data.get("idempotency_key") or idempotency_key(data, self.cfg.scanner_name, self.cfg.scanner_version)
         existing = self.scans.find_by_key(key)
         if existing:
             if existing["status"] in ("FAILED", "DEAD_LETTER", "CANCELLED"):

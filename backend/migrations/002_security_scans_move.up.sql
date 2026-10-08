@@ -8,7 +8,11 @@ ON CONFLICT (organization_id) DO NOTHING;
 
 DO $$
 BEGIN
-  IF to_regclass('public.scans') IS NOT NULL THEN
+  IF to_regclass('public.scans') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'scans' AND column_name = 'status'
+     ) THEN
     INSERT INTO tbl_organizations (id, name)
     SELECT DISTINCT organization_id, organization_id FROM scans
     WHERE btrim(organization_id) <> ''
@@ -55,7 +59,11 @@ BEGIN
     ON CONFLICT (id) DO NOTHING;
   END IF;
 
-  IF to_regclass('public.scans') IS NOT NULL THEN
+  IF to_regclass('public.scans') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'scans' AND column_name = 'status'
+     ) THEN
     INSERT INTO tbl_scan_runs (
       id, security_scans_id, organization_id, project_id, application_id, application_name,
       application_version, version_strategy, bom_type, source_type, scan_status, scan_stage,
@@ -146,7 +154,11 @@ BEGIN
     ON CONFLICT (id) DO NOTHING;
   END IF;
 
-  IF to_regclass('public.scans') IS NOT NULL THEN
+  IF to_regclass('public.scans') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'scans' AND column_name = 'status'
+     ) THEN
     UPDATE tbl_scan_runs AS r
     SET bom_snapshot_id = s.snapshot_id
     FROM scans AS s
@@ -263,13 +275,9 @@ END $$;
 DROP TABLE IF EXISTS repository_connections CASCADE;
 DROP TABLE IF EXISTS repositories CASCADE;
 DROP TABLE IF EXISTS component_vulnerabilities CASCADE;
-DROP TABLE IF EXISTS vulnerabilities CASCADE;
 DROP TABLE IF EXISTS exports CASCADE;
 DROP TABLE IF EXISTS scanner_versions CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
-DROP TABLE IF EXISTS applications CASCADE;
-DROP TABLE IF EXISTS projects CASCADE;
-DROP TABLE IF EXISTS organizations CASCADE;
 DROP TABLE IF EXISTS audit_logs CASCADE;
 DROP TABLE IF EXISTS webhook_events CASCADE;
 DROP TABLE IF EXISTS bulk_scan_items CASCADE;
@@ -281,4 +289,27 @@ DROP TABLE IF EXISTS bom_components CASCADE;
 DROP TABLE IF EXISTS bom_snapshots CASCADE;
 DROP TABLE IF EXISTS scan_events CASCADE;
 DROP TABLE IF EXISTS scan_jobs CASCADE;
-DROP TABLE IF EXISTS scans CASCADE;
+
+-- organizations, projects, applications, vulnerabilities, and scans are the
+-- current schema. Drop those names only when they still have the old columns.
+DO $$
+BEGIN
+  IF to_regclass('public.scans') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'scans' AND column_name = 'status'
+     )
+     AND NOT EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'scans' AND column_name = 'scan_status'
+     ) THEN
+    DROP TABLE scans CASCADE;
+  END IF;
+  IF to_regclass('public.vulnerabilities') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'vulnerabilities' AND column_name = 'vulnerability_key'
+     ) THEN
+    DROP TABLE vulnerabilities CASCADE;
+  END IF;
+END $$;

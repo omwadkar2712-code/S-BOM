@@ -391,12 +391,6 @@ def build(cfg: Config | None = None) -> FastAPI:
         except RescanError as exc:
             status = 409 if exc.code == "SCAN_NOT_RESCANNABLE" else 400
             return _error(exc.code, str(exc), rid(request), status)
-        db.execute(
-            """UPDATE tbl_bulk_scan_items
-               SET item_status='QUEUED', error_code=NULL, error_message=NULL, started_at=NULL, completed_at=NULL
-               WHERE scan_run_id=?""",
-            (scan_id,),
-        )
         return _envelope(
             {"scan_id": updated["id"], "status": updated["status"], "stage": updated["stage"]},
             rid(request),
@@ -412,12 +406,6 @@ def build(cfg: Config | None = None) -> FastAPI:
             updated = orch.cancel(scan)
         except CancelError as exc:
             return _error(exc.code, str(exc), rid(request), 409)
-        db.execute(
-            """UPDATE tbl_bulk_scan_items
-               SET item_status='CANCELLED', error_code='CANCELLED', error_message='Cancelled by user', completed_at=CURRENT_TIMESTAMP
-               WHERE scan_run_id=? AND item_status IN ('QUEUED','RUNNING','PENDING')""",
-            (scan_id,),
-        )
         return _envelope(
             {"scan_id": updated["id"], "status": updated["status"], "stage": updated["stage"]},
             rid(request),
@@ -473,10 +461,9 @@ def build(cfg: Config | None = None) -> FastAPI:
         if bulk is not None:
             format_name = request.query_params.get("format", format)
             child_rows = db.execute(
-                """SELECT s.bom_snapshot_id, s.project_id, s.application_name, s.application_version
-                   FROM tbl_bulk_scan_items bsi
-                   JOIN tbl_scan_runs s ON s.id = bsi.scan_run_id
-                   WHERE bsi.bulk_scan_id = ? AND s.bom_snapshot_id IS NOT NULL AND s.scan_status = 'COMPLETED'""",
+                """SELECT s.sbom_id, s.project_id, s.application_name, s.application_version
+                   FROM scans s
+                   WHERE s.bulk_scan_id = ? AND s.sbom_id IS NOT NULL AND s.scan_status = 'COMPLETED'""",
                 (scan_id,),
             ).fetchall()
             snapshots = [boms.get_snapshot(r[0]) for r in child_rows if r[0]]
@@ -661,20 +648,26 @@ def build(cfg: Config | None = None) -> FastAPI:
         if not delivery:
             return _error("INVALID_INPUT", "missing delivery id", rid(request), 400)
         org = _org(request)
-        try:
-            from app.catalog.store import ensure_security_scans
-
-            workspace_id = ensure_security_scans(db, org)
-            db.execute(
-                """INSERT INTO tbl_webhook_events (
-                   id, security_scans_id, provider, event_type, delivery_id, received_at, is_processed)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (str(uuid.uuid4()), workspace_id, "github", event, delivery, iso(utcnow()), False),
-            )
-        except Exception:
+        delivery_key = "webhook:" + delivery
+        if scans.find_by_key(delivery_key):
             return _envelope({"status": "duplicate"}, rid(request))
-        audit.record("WEBHOOK_RECEIVED", metadata={"event": event, "delivery": delivery})
         if event not in ("push", "release"):
+            from app.catalog.store import ensure_organization
+            from app.repositories.store import iso, utcnow
+
+            ensure_organization(db, org)
+            db.execute(
+                """INSERT INTO scans (
+                   id, organization_id, project_id, application_id, application_name,
+                   application_version, version_strategy, bom_type, source_type, scan_status,
+                   scan_stage, idempotency_key, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT (idempotency_key) DO NOTHING""",
+                (
+                    str(uuid.uuid4()), org, "", "", "", "", "VERSION_UNKNOWN", "SBOM", "GITHUB",
+                    "IGNORED", "IGNORED", delivery_key, iso(utcnow()),
+                ),
+            )
             return _envelope({"status": "ignored"}, rid(request))
         try:
             payload = json.loads(body)
@@ -703,6 +696,7 @@ def build(cfg: Config | None = None) -> FastAPI:
                     "version_strategy": "VERSION_UNKNOWN",
                     "bom_type": "SBOM",
                     "source_type": "GITHUB",
+                    "idempotency_key": delivery_key,
                     "source_payload": {
                         "repository_url": url,
                         "branch": branch,
@@ -797,29 +791,19 @@ def _row_problems(errors: list) -> dict[int, list]:
 
 
 def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, rows: list, errors: list) -> dict:
-    from app.catalog.store import ensure_security_scans
+    from app.catalog.store import ensure_organization
     from app.repositories.store import iso, utcnow
 
     bulk_id = str(uuid.uuid4())
     created = iso(utcnow())
     problems = _row_problems(errors)
     catalog = CatalogRepo(db)
-    ensure_security_scans(db, org)
-    db.execute(
-        """INSERT INTO tbl_bulk_scans (
-           id, security_scans_id, organization_id, project_id, bulk_status, file_name,
-           total_rows, invalid_rows, created_at, validation_errors)
-           SELECT ?, ws.id, ?, ?, ?, ?, ?, ?, ?, ?
-           FROM tbl_security_scans ws
-           WHERE ws.organization_id = ?""",
-        (bulk_id, org, project, "PROCESSING", filename, len(rows), len(problems), created, json.dumps(errors), org),
-    )
+    ensure_organization(db, org)
     METRICS.add("bulk_scans_total")
     items = []
     queued = 0
     seen_scans: set[str] = set()
     for row in rows:
-        item_id = str(uuid.uuid4())
         scan_id = ""
         error_code = ""
         error_message = ""
@@ -828,6 +812,9 @@ def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, 
             status = "SKIPPED"
             error_code = row_problems[0]["code"]
             error_message = "; ".join(problem["message"] for problem in row_problems)
+            scan_id = _insert_bulk_row(
+                db, org, bulk_id, filename, len(rows), row, status, error_code, error_message, created,
+            )
         else:
             try:
                 project_name = row["project_name"] or project
@@ -852,6 +839,8 @@ def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, 
                         },
                         "bulk_scan_id": bulk_id,
                         "bulk_row": row["row_number"],
+                        "repository_url": row["repository_url"],
+                        "branch": row["branch"],
                     }
                 )
             except Exception as exc:
@@ -859,6 +848,9 @@ def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, 
                 error_code = "SCAN_CREATE_FAILED"
                 error_message = str(exc)
                 errors.append({"row": row["row_number"], "field": "repository_url", "code": error_code, "message": error_message})
+                scan_id = _insert_bulk_row(
+                    db, org, bulk_id, filename, len(rows), row, status, error_code, error_message, created,
+                )
             else:
                 outcome = scan.get("outcome")
                 if outcome == "existing" or scan["id"] in seen_scans:
@@ -877,32 +869,16 @@ def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, 
                             "message": error_message,
                         }
                     )
+                    scan_id = _insert_bulk_row(
+                        db, org, bulk_id, filename, len(rows), row, status, error_code, error_message, created,
+                    )
                 else:
                     status = "QUEUED"
                     scan_id = scan["id"]
                     seen_scans.add(scan["id"])
                     queued += 1
-        db.execute(
-            """INSERT INTO tbl_bulk_scan_items
-               (id, bulk_scan_id, source_row_number, scan_run_id, project_name, application_name,
-                application_version, repository_url, item_status, error_code, error_message)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                item_id,
-                bulk_id,
-                row["row_number"],
-                scan_id or None,
-                row["project_name"],
-                row["application_name"],
-                row["version"],
-                row["repository_url"],
-                status,
-                error_code or None,
-                error_message or None,
-            ),
-        )
         payload = {
-            "id": item_id,
+            "id": scan_id,
             "bulk_scan_id": bulk_id,
             "row_number": row["row_number"],
             "project_name": row["project_name"],
@@ -911,7 +887,7 @@ def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, 
             "repository_url": row["repository_url"],
             "status": status,
         }
-        if scan_id:
+        if status == "QUEUED":
             payload["scan_id"] = scan_id
         if error_code:
             payload["error_code"] = error_code
@@ -921,8 +897,10 @@ def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, 
     invalid_rows = len(rows) - queued
     status = "PROCESSING" if queued else "FAILED"
     db.execute(
-        "UPDATE tbl_bulk_scans SET bulk_status=?, invalid_rows=?, validation_errors=? WHERE id=?",
-        (status, invalid_rows, json.dumps(errors), bulk_id),
+        """UPDATE scans
+           SET bulk_file_name=?, bulk_status=?, bulk_total_rows=?, bulk_invalid_rows=?, bulk_errors=?
+           WHERE bulk_scan_id=?""",
+        (filename, status, len(rows), invalid_rows, json.dumps(errors), bulk_id),
     )
     return {
         "id": bulk_id,
@@ -939,51 +917,61 @@ def _submit_bulk(db, orch: Orchestrator, org: str, project: str, filename: str, 
     }
 
 
+def _insert_bulk_row(db, org, bulk_id, filename, total, row, status, error_code, error_message, created) -> str:
+    item_id = str(uuid.uuid4())
+    db.execute(
+        """INSERT INTO scans (
+           id, organization_id, project_id, application_id, application_name, application_version,
+           version_strategy, bom_type, source_type, scan_status, scan_stage, error_code, error_message,
+           idempotency_key, created_at, bulk_scan_id, bulk_row_number, bulk_file_name, bulk_total_rows,
+           repository_url, branch)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            item_id, org, row["project_name"], row["application_name"], row["application_name"],
+            row["version"] or "UNKNOWN", "VERSION_MANUAL", "SBOM", "GITHUB", status, status,
+            error_code or "", error_message or "", "bulk-item:" + item_id, created, bulk_id,
+            row["row_number"], filename, total, row["repository_url"], row.get("branch") or "",
+        ),
+    )
+    return item_id
+
+
 def _get_bulk(db, bulk_id: str, org: str) -> dict | None:
-    row = db.execute(
-        """SELECT id, organization_id, project_id, bulk_status AS status, file_name AS filename,
-                  total_rows, invalid_rows, created_at, completed_at, validation_errors
-           FROM tbl_bulk_scans WHERE id=? AND organization_id=?""",
-        (bulk_id, org),
-    ).fetchone()
-    if row is None:
-        return None
-    errors = json.loads(row["validation_errors"]) if row["validation_errors"] else []
     item_rows = db.execute(
-        """SELECT bsi.id, bsi.bulk_scan_id, bsi.source_row_number, COALESCE(bsi.scan_run_id,''),
-                  bsi.project_name, bsi.application_name, bsi.application_version, bsi.repository_url,
-                  CASE WHEN bsi.item_status = 'SKIPPED' THEN bsi.item_status ELSE COALESCE(s.scan_status, bsi.item_status) END,
-                  CASE WHEN bsi.item_status = 'SKIPPED' THEN COALESCE(bsi.error_code, '') ELSE COALESCE(NULLIF(s.error_code, ''), bsi.error_code, '') END,
-                  CASE WHEN bsi.item_status = 'SKIPPED' THEN COALESCE(bsi.error_message, '') ELSE COALESCE(NULLIF(s.error_message, ''), bsi.error_message, '') END,
-                  s.started_at, s.completed_at
-           FROM tbl_bulk_scan_items bsi
-           LEFT JOIN tbl_scan_runs s ON s.id = bsi.scan_run_id
-           WHERE bsi.bulk_scan_id = ?
-           ORDER BY bsi.source_row_number""",
-        (bulk_id,),
+        """SELECT id, bulk_scan_id, bulk_row_number, project_id, application_name, application_version,
+                  repository_url, scan_status, error_code, error_message, started_at, completed_at,
+                  bulk_file_name, bulk_total_rows, bulk_invalid_rows, bulk_errors, created_at, organization_id
+           FROM scans
+           WHERE bulk_scan_id = ? AND organization_id = ?
+           ORDER BY bulk_row_number, created_at""",
+        (bulk_id, org),
     ).fetchall()
+    if not item_rows:
+        return None
+    head = item_rows[0]
+    errors = json.loads(head["bulk_errors"]) if head["bulk_errors"] else []
     items = []
     for item in item_rows:
         payload = {
-            "id": item[0],
-            "bulk_scan_id": item[1],
-            "row_number": item[2],
-            "project_name": item[4],
-            "application_name": item[5],
-            "version": item[6],
-            "repository_url": item[7],
-            "status": item[8],
+            "id": item["id"],
+            "bulk_scan_id": item["bulk_scan_id"],
+            "row_number": item["bulk_row_number"],
+            "project_name": item["project_id"],
+            "application_name": item["application_name"],
+            "version": item["application_version"],
+            "repository_url": item["repository_url"],
+            "status": item["scan_status"],
         }
-        if item[3]:
-            payload["scan_id"] = item[3]
-        if item[9]:
-            payload["error_code"] = item[9]
-        if item[10]:
-            payload["error_message"] = item[10]
-        if item[11]:
-            payload["started_at"] = item[11]
-        if item[12]:
-            payload["completed_at"] = item[12]
+        if item["scan_status"] not in ("SKIPPED", "FAILED", "IGNORED"):
+            payload["scan_id"] = item["id"]
+        if item["error_code"]:
+            payload["error_code"] = item["error_code"]
+        if item["error_message"]:
+            payload["error_message"] = item["error_message"]
+        if item["started_at"]:
+            payload["started_at"] = item["started_at"]
+        if item["completed_at"]:
+            payload["completed_at"] = item["completed_at"]
         items.append(payload)
     failed = sum(1 for item in items if item["status"] in ("FAILED", "SKIPPED", "DEAD_LETTER"))
     completed = sum(1 for item in items if item["status"] == "COMPLETED")
@@ -994,25 +982,23 @@ def _get_bulk(db, bulk_id: str, org: str) -> dict | None:
         status = "COMPLETED_WITH_ERRORS"
     elif failed and not completed:
         status = "FAILED"
-    elif row["invalid_rows"] and not completed:
+    elif head["bulk_invalid_rows"] and not completed:
         status = "FAILED"
     elif not completed:
         status = "PROCESSING"
     else:
         status = "COMPLETED"
     agg = {
-        "id": row["id"],
-        "organization_id": row["organization_id"],
-        "project_id": row["project_id"],
+        "id": bulk_id,
+        "organization_id": head["organization_id"],
+        "project_id": head["project_id"],
         "status": status,
-        "filename": row["filename"],
-        "total_rows": row["total_rows"],
-        "invalid_rows": row["invalid_rows"],
-        "created_at": row["created_at"],
+        "filename": head["bulk_file_name"],
+        "total_rows": head["bulk_total_rows"],
+        "invalid_rows": head["bulk_invalid_rows"],
+        "created_at": head["created_at"],
         "items": items,
     }
-    if row["completed_at"]:
-        agg["completed_at"] = row["completed_at"]
     if errors:
         agg["validation_errors"] = errors
     return agg

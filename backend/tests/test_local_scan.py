@@ -78,7 +78,7 @@ def test_local_package_json_scan(tmp_path):
 def _component_versions(name: str) -> list[str]:
     conn = psycopg.connect(TEST_DB, autocommit=True)
     rows = conn.execute(
-        "SELECT component_version FROM tbl_bom_components WHERE lower(component_name) = lower(%s) ORDER BY component_version",
+        "SELECT version FROM sbom_components WHERE lower(name) = lower(%s) ORDER BY version",
         (name,),
     ).fetchall()
     conn.close()

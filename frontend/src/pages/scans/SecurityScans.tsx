@@ -40,7 +40,7 @@ import { useAppState } from '../../context/AppStateContext';
 import type { ScanJob } from '../../types';
 import { ProjectApplicationSelect } from '../../components/common/ProjectApplicationSelect';
 import type { CatalogRecord } from '../../api/client';
-import { filesFromDataTransfer, folderLabel, folderTypeLabel, isArchiveName, isManifestRelativePath, selectFolderManifests, SUPPORTED_MANIFEST_HINT, type FolderFile } from './localFolder';
+import { filesFromDataTransfer, fileTypesIn, folderLabel, folderTypeLabel, isArchiveName, isManifestRelativePath, selectFolderManifests, SUPPORTED_MANIFEST_HINT, type FolderFile } from './localFolder';
 import { classifyBulkCsv } from './bulkRows';
 import { PipelineGrid, ScanResultDetails } from './ScanResultDetails';
 import { displayStatus, formatDuration, formatEventTime, isOpenStatus, stageLabel } from './scanProgress';
@@ -287,11 +287,78 @@ export const SecurityScans: React.FC = () => {
   };
 
   // Scan Configuration State (Combined on same page as per Excel Sr 5)
-  const [sbomFormat, setSbomFormat] = useState<'SPDX-2.3' | 'CycloneDX-1.5'>('SPDX-2.3');
+  const [sbomFormat, setSbomFormat] = useState<'SPDX-2.3' | 'CycloneDX-1.5'>('CycloneDX-1.5');
   const [vulnScan, setVulnScan] = useState(true);
   const [licenseCheck, setLicenseCheck] = useState(true);
   const [cryptoScan, setCryptoScan] = useState(true);
   const [signArtifact, setSignArtifact] = useState(true);
+
+  // Computes the correct file format for the selected scan source
+  const getPrimaryFormatLabel = (): string => {
+    if (sourceType === 'bulk') {
+      if (bulkMode === 'file') {
+        const name = (uploadedBulk?.name || bulkFile?.name || '').toLowerCase();
+        if (name.endsWith('.xlsx')) return 'Excel (.xlsx)';
+        if (name.endsWith('.csv')) return 'CSV (.csv)';
+        return 'CSV (.csv)';
+      }
+      return 'Plain Text (Git URLs)';
+    }
+
+    if (sourceType === 'git') {
+      return 'Remote Git Repository';
+    }
+
+    if (localFile) {
+      const name = localFile.name.toLowerCase();
+      if (name.endsWith('.json')) {
+        if (name.includes('cyclonedx') || name === 'bom.json') return 'CycloneDX 1.5 JSON (.json)';
+        if (name.includes('spdx')) return 'SPDX 2.3 JSON (.json)';
+        return 'JSON (.json)';
+      }
+      if (name.endsWith('.xml')) {
+        if (name.includes('cyclonedx') || name === 'bom.xml') return 'CycloneDX 1.5 XML (.xml)';
+        if (name.includes('spdx')) return 'SPDX 2.3 XML (.xml)';
+        return 'XML (.xml)';
+      }
+      if (name.endsWith('.zip')) return 'ZIP Archive (.zip)';
+      if (name.endsWith('.tar.gz') || name.endsWith('.tgz')) return 'Tar Archive (.tgz)';
+      if (name.endsWith('.txt')) return 'Text Manifest (.txt)';
+      if (name.endsWith('.lock')) return 'Lockfile (.lock)';
+      if (name.endsWith('.yaml') || name.endsWith('.yml')) return 'YAML (.yaml)';
+      if (name.endsWith('.toml')) return 'TOML (.toml)';
+      if (name.endsWith('.gradle') || name.endsWith('.kts')) return 'Gradle Script (.gradle)';
+      if (name.endsWith('.mod') || name.endsWith('.sum')) return 'Go Module (.mod)';
+      if (name.endsWith('.csproj') || name.endsWith('.vbproj') || name.endsWith('.fsproj')) return '.NET Project';
+
+      const parts = name.split('.');
+      if (parts.length > 1) {
+        const ext = parts.pop();
+        return `${ext?.toUpperCase()} (.${ext})`;
+      }
+      return 'Source File';
+    }
+
+    if (localFolder && localFolder.length > 0) {
+      const types = fileTypesIn(localFolder);
+      if (types.length > 0) {
+        return `Project Directory (${types.map((t: string) => t.toUpperCase()).slice(0, 3).join(', ')})`;
+      }
+      return 'Project Directory (Multi-Manifest)';
+    }
+
+    if (selectedFolder) {
+      const lower = selectedFolder.toLowerCase();
+      if (lower.endsWith('.zip')) return 'ZIP Archive (.zip)';
+      if (lower.endsWith('.json')) return 'JSON (.json)';
+      if (lower.endsWith('.xml')) return 'XML (.xml)';
+      if (lower.endsWith('.csv')) return 'CSV (.csv)';
+      if (lower.endsWith('.txt')) return 'Text Manifest (.txt)';
+      return 'Local Source Directory';
+    }
+
+    return 'CycloneDX 1.5 (JSON)';
+  };
 
   // Tooltip State (Excel Sr 9: hover info icons)
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
@@ -1128,7 +1195,12 @@ export const SecurityScans: React.FC = () => {
                           }}
                         />
                         {selectedFolder && (
-                          <p className="text-[11px] text-gray-600 dark:text-gray-300 mt-2 font-mono">{selectedFolder}</p>
+                          <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
+                            <p className="text-[11px] text-gray-600 dark:text-gray-300 font-mono">{selectedFolder}</p>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                              {getPrimaryFormatLabel()}
+                            </span>
+                          </div>
                         )}
                       </div>
 
@@ -1502,7 +1574,7 @@ export const SecurityScans: React.FC = () => {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Primary Format:</span>
-                        <span className="font-bold text-blue-600 dark:text-blue-400">{sbomFormat}</span>
+                        <span className="font-bold text-blue-600 dark:text-blue-400">{getPrimaryFormatLabel()}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Modules Enabled:</span>

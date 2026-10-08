@@ -270,17 +270,9 @@ export const Vulnerabilities: React.FC = () => {
     <div className="space-y-4 animate-fadeIn pb-14">
       {/* Top Container with No Blank Space Above Metric Boxes */}
       <div className="bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl p-4 sm:p-5 shadow-2xs space-y-4">
-        {/* Header Row: Title & Project Scope Dropdown */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white">
-              Vulnerability Management
-            </h1>
-          </div>
-
-          {/* Project Scope Dropdown (Real dynamic projects only) */}
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-1.5 shadow-2xs hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
+        {/* Project Scope Dropdown Row */}
+        <div className="flex items-center justify-end">
+          <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-1.5 shadow-2xs hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
               <Folder className="w-4 h-4 text-gray-400" />
               <select
                 value={projectFilter}
@@ -296,7 +288,6 @@ export const Vulnerabilities: React.FC = () => {
               </select>
             </div>
           </div>
-        </div>
 
         {/* 5 Severity Metric Cards directly below (NO blank space above) */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">

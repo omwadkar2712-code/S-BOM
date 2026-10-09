@@ -255,17 +255,83 @@ WHERE catalog_application_id IS NOT NULL
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO projects (id, organization_id, name)
-SELECT DISTINCT project_id, organization_id, 'Recovered ' || project_id
-FROM inventory_components
-WHERE project_id IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = inventory_components.project_id)
+SELECT DISTINCT ON (ic.project_id)
+  ic.project_id,
+  ic.organization_id,
+  left(btrim(names.project_name), 200)
+FROM inventory_components ic
+JOIN LATERAL (
+  SELECT ranked.project_name
+  FROM (
+    SELECT t.project_name, 1 AS rank
+    FROM tbl_projects_and_microservices t
+    WHERE t.id = ic.project_id
+      AND t.organization_id = ic.organization_id
+      AND btrim(t.project_name) <> ''
+    UNION ALL
+    SELECT s.project_id, 2
+    FROM sboms s
+    WHERE s.catalog_project_id = ic.project_id
+      AND s.organization_id = ic.organization_id
+      AND btrim(COALESCE(s.project_id, '')) <> ''
+      AND s.project_id IS DISTINCT FROM ic.project_id
+    UNION ALL
+    SELECT sc.project_id, 3
+    FROM scans sc
+    WHERE sc.catalog_project_id = ic.project_id
+      AND sc.organization_id = ic.organization_id
+      AND btrim(COALESCE(sc.project_id, '')) <> ''
+      AND sc.project_id IS DISTINCT FROM ic.project_id
+  ) AS ranked
+  ORDER BY ranked.rank
+  LIMIT 1
+) names ON TRUE
+WHERE ic.project_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = ic.project_id)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO applications (id, project_id, organization_id, name)
-SELECT DISTINCT application_id, project_id, organization_id, 'Recovered ' || application_id
-FROM inventory_components
-WHERE application_id IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.id = inventory_components.application_id)
+SELECT DISTINCT ON (ic.application_id)
+  ic.application_id,
+  ic.project_id,
+  ic.organization_id,
+  left(btrim(names.application_name), 200)
+FROM inventory_components ic
+JOIN LATERAL (
+  SELECT ranked.application_name
+  FROM (
+    SELECT t.service_name AS application_name, 1 AS rank
+    FROM tbl_project_applications_and_services t
+    WHERE t.id = ic.application_id
+      AND t.project_id = ic.project_id
+      AND t.organization_id = ic.organization_id
+      AND btrim(t.service_name) <> ''
+    UNION ALL
+    SELECT s.application_id, 2
+    FROM sboms s
+    WHERE s.catalog_application_id = ic.application_id
+      AND s.organization_id = ic.organization_id
+      AND btrim(COALESCE(s.application_id, '')) <> ''
+      AND s.application_id IS DISTINCT FROM ic.application_id
+    UNION ALL
+    SELECT COALESCE(NULLIF(btrim(sc.application_name), ''), NULLIF(btrim(sc.application_id), '')), 3
+    FROM scans sc
+    WHERE sc.catalog_application_id = ic.application_id
+      AND sc.organization_id = ic.organization_id
+      AND btrim(COALESCE(NULLIF(btrim(sc.application_name), ''), NULLIF(btrim(sc.application_id), ''), '')) <> ''
+      AND COALESCE(NULLIF(btrim(sc.application_name), ''), sc.application_id) IS DISTINCT FROM ic.application_id
+  ) AS ranked
+  WHERE ranked.application_name IS NOT NULL
+  ORDER BY ranked.rank
+  LIMIT 1
+) names ON TRUE
+WHERE ic.application_id IS NOT NULL
+  AND ic.project_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM projects p
+    WHERE p.id = ic.project_id AND p.organization_id = ic.organization_id
+  )
+  AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.id = ic.application_id)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO scans (
@@ -451,13 +517,31 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO projects (id, organization_id, name, created_at, updated_at)
 SELECT id, organization_id, project_name, created_at, updated_at
-FROM tbl_projects_and_microservices
-ON CONFLICT (organization_id, name) DO NOTHING;
+FROM tbl_projects_and_microservices t
+WHERE NOT EXISTS (
+  SELECT 1 FROM projects p
+  WHERE p.organization_id = t.organization_id
+    AND p.name = t.project_name
+    AND p.id <> t.id
+)
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    updated_at = CURRENT_TIMESTAMP
+WHERE projects.name LIKE 'Recovered %';
 
 INSERT INTO applications (id, project_id, organization_id, name, created_at)
 SELECT id, project_id, organization_id, service_name, created_at
-FROM tbl_project_applications_and_services
-ON CONFLICT (organization_id, project_id, name) DO NOTHING;
+FROM tbl_project_applications_and_services t
+WHERE NOT EXISTS (
+  SELECT 1 FROM applications a
+  WHERE a.organization_id = t.organization_id
+    AND a.project_id = t.project_id
+    AND a.name = t.service_name
+    AND a.id <> t.id
+)
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name
+WHERE applications.name LIKE 'Recovered %';
 
 INSERT INTO inventory_components (
   id, organization_id, project_id, application_id, name, package_name, version,
@@ -659,6 +743,71 @@ FROM tbl_findings f
 JOIN sbom_components c ON c.id = f.bom_component_id AND c.sbom_id = f.bom_snapshot_id
 JOIN vulnerabilities v ON v.id = f.vulnerability_id
 ON CONFLICT (sbom_component_id, vulnerability_id) DO NOTHING;
+
+UPDATE projects AS p
+SET name = left(btrim(src.project_name), 200),
+    updated_at = CURRENT_TIMESTAMP
+FROM (
+  SELECT DISTINCT ON (id) id, organization_id, project_name
+  FROM (
+    SELECT catalog_project_id AS id, organization_id, project_id AS project_name, 1 AS rank
+    FROM sboms
+    WHERE catalog_project_id IS NOT NULL
+      AND btrim(COALESCE(project_id, '')) <> ''
+      AND project_id IS DISTINCT FROM catalog_project_id
+    UNION ALL
+    SELECT catalog_project_id, organization_id, project_id, 2
+    FROM scans
+    WHERE catalog_project_id IS NOT NULL
+      AND btrim(COALESCE(project_id, '')) <> ''
+      AND project_id IS DISTINCT FROM catalog_project_id
+  ) AS candidates
+  ORDER BY id, rank, project_name
+) AS src
+WHERE p.id = src.id
+  AND p.organization_id = src.organization_id
+  AND p.name LIKE 'Recovered %'
+  AND NOT EXISTS (
+    SELECT 1 FROM projects other
+    WHERE other.organization_id = p.organization_id
+      AND other.name = left(btrim(src.project_name), 200)
+      AND other.id <> p.id
+  );
+
+UPDATE applications AS a
+SET name = left(btrim(src.application_name), 200)
+FROM (
+  SELECT DISTINCT ON (id) id, project_id, organization_id, application_name
+  FROM (
+    SELECT catalog_application_id AS id, catalog_project_id AS project_id, organization_id,
+           application_id AS application_name, 1 AS rank
+    FROM sboms
+    WHERE catalog_application_id IS NOT NULL
+      AND catalog_project_id IS NOT NULL
+      AND btrim(COALESCE(application_id, '')) <> ''
+      AND application_id IS DISTINCT FROM catalog_application_id
+    UNION ALL
+    SELECT catalog_application_id, catalog_project_id, organization_id,
+           COALESCE(NULLIF(btrim(application_name), ''), application_id), 2
+    FROM scans
+    WHERE catalog_application_id IS NOT NULL
+      AND catalog_project_id IS NOT NULL
+      AND btrim(COALESCE(NULLIF(btrim(application_name), ''), NULLIF(btrim(application_id), ''), '')) <> ''
+      AND COALESCE(NULLIF(btrim(application_name), ''), application_id) IS DISTINCT FROM catalog_application_id
+  ) AS candidates
+  ORDER BY id, rank, application_name
+) AS src
+WHERE a.id = src.id
+  AND a.project_id = src.project_id
+  AND a.organization_id = src.organization_id
+  AND a.name LIKE 'Recovered %'
+  AND NOT EXISTS (
+    SELECT 1 FROM applications other
+    WHERE other.organization_id = a.organization_id
+      AND other.project_id = a.project_id
+      AND other.name = left(btrim(src.application_name), 200)
+      AND other.id <> a.id
+  );
 
 DROP TABLE IF EXISTS tbl_component_compliance_checks CASCADE;
 DROP TABLE IF EXISTS tbl_component_hashes CASCADE;

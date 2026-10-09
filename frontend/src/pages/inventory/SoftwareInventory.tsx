@@ -123,12 +123,12 @@ export const SoftwareInventory: React.FC = () => {
         comp.risk === 'Critical'
           ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300'
           : comp.risk === 'High'
-          ? 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/40 dark:text-orange-300'
-          : comp.risk === 'Medium'
-          ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300'
-          : comp.risk === 'Low'
-          ? 'bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-950/40 dark:text-yellow-300'
-          : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300',
+            ? 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/40 dark:text-orange-300'
+            : comp.risk === 'Medium'
+              ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300'
+              : comp.risk === 'Low'
+                ? 'bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-950/40 dark:text-yellow-300'
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300',
     };
   });
 
@@ -334,10 +334,9 @@ export const SoftwareInventory: React.FC = () => {
             to={`/software-inventory${tabSearch}`}
             end
             className={({ isActive }) =>
-              `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
-                isActive
-                  ? 'bg-blue-50/80 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-600 font-bold shadow-2xs'
-                  : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/40'
+              `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${isActive
+                ? 'bg-blue-50/80 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-600 font-bold shadow-2xs'
+                : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/40'
               }`
             }
           >
@@ -348,10 +347,9 @@ export const SoftwareInventory: React.FC = () => {
           <NavLink
             to={`/software-inventory/projects${tabSearch}`}
             className={({ isActive }) =>
-              `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
-                isActive
-                  ? 'bg-blue-50/80 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-600 font-bold shadow-2xs'
-                  : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/40'
+              `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${isActive
+                ? 'bg-blue-50/80 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-600 font-bold shadow-2xs'
+                : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/40'
               }`
             }
           >
@@ -362,10 +360,9 @@ export const SoftwareInventory: React.FC = () => {
           <NavLink
             to={`/software-inventory/artifacts${tabSearch}`}
             className={({ isActive }) =>
-              `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
-                isActive
-                  ? 'bg-blue-50/80 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-600 font-bold shadow-2xs'
-                  : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/40'
+              `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${isActive
+                ? 'bg-blue-50/80 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-600 font-bold shadow-2xs'
+                : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/40'
               }`
             }
           >
@@ -630,11 +627,10 @@ export const SoftwareInventory: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowFilters((prev) => !prev)}
-              className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0 ${
-                showFilters || (typeFilter !== 'All Types' || licenseFilter !== 'All Licenses' || riskFilter !== 'All Risk Levels' || sourceFilter !== 'All Sources')
+              className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0 ${showFilters || (typeFilter !== 'All Types' || licenseFilter !== 'All Licenses' || riskFilter !== 'All Risk Levels' || sourceFilter !== 'All Sources')
                   ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-400 dark:border-blue-600 text-blue-600 dark:text-blue-400'
                   : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-600'
-              }`}
+                }`}
               title="Toggle Filters"
             >
               <Filter className="w-3.5 h-3.5" />
@@ -786,7 +782,7 @@ export const SoftwareInventory: React.FC = () => {
                 <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">LICENSE</th>
                 <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">VULNERABILITIES</th>
                 <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">P-URL</th>
-                <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">RISK LEVEL</th>
+                <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[11px] whitespace-nowrap">AVERAGE RISK LEVEL</th>
                 <th className="py-2.5 pr-4 pl-3 font-bold uppercase tracking-wider text-[11px] text-right whitespace-nowrap">ACTIONS</th>
               </tr>
             </thead>
@@ -1201,11 +1197,10 @@ export const SoftwareInventory: React.FC = () => {
                   </div>
                   {sbomUploadFileName ? (
                     <div className="space-y-1">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
-                        sbomParseError
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${sbomParseError
                           ? 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
                           : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-                      }`}>
+                        }`}>
                         {sbomParseError ? <X className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                         <span>{sbomUploadFileName}</span>
                       </span>
@@ -1213,8 +1208,8 @@ export const SoftwareInventory: React.FC = () => {
                         {parsedSbom
                           ? `${parsedSbom.format} · ${parsedSbom.rows.length} component${parsedSbom.rows.length === 1 ? '' : 's'} ready for the inventory`
                           : sbomParseError
-                          ? 'Choose a CycloneDX or SPDX file'
-                          : 'Reading SBOM…'}
+                            ? 'Choose a CycloneDX or SPDX file'
+                            : 'Reading SBOM…'}
                       </p>
                       <label
                         htmlFor="sbom-upload-file"

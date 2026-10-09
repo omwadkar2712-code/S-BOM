@@ -162,6 +162,12 @@ export const SecurityScans: React.FC = () => {
       setLocalFolder([]);
       setLocalFile(items[0].file);
       setSelectedFolder(items[0].file.name);
+      const name = items[0].file.name.toLowerCase();
+      if (name.includes('cyclonedx') || name === 'bom.json' || name === 'bom.xml') {
+        setSbomFormat('CYCLONE DX');
+      } else if (name.includes('spdx')) {
+        setSbomFormat('SPDX');
+      }
       return;
     }
     useFolderManifests(items);
@@ -286,12 +292,8 @@ export const SecurityScans: React.FC = () => {
     }
   };
 
-  // Scan Configuration State (Combined on same page as per Excel Sr 5)
-  const [sbomFormat, setSbomFormat] = useState<'SPDX-2.3' | 'CycloneDX-1.5'>('CycloneDX-1.5');
-  const [vulnScan, setVulnScan] = useState(true);
-  const [licenseCheck, setLicenseCheck] = useState(true);
-  const [cryptoScan, setCryptoScan] = useState(true);
-  const [signArtifact, setSignArtifact] = useState(true);
+  // Scan Configuration State
+  const [sbomFormat, setSbomFormat] = useState<'SPDX' | 'CYCLONE DX'>('SPDX');
 
   // Computes the correct file format for the selected scan source
   const getPrimaryFormatLabel = (): string => {
@@ -312,13 +314,13 @@ export const SecurityScans: React.FC = () => {
     if (localFile) {
       const name = localFile.name.toLowerCase();
       if (name.endsWith('.json')) {
-        if (name.includes('cyclonedx') || name === 'bom.json') return 'CycloneDX 1.5 JSON (.json)';
-        if (name.includes('spdx')) return 'SPDX 2.3 JSON (.json)';
+        if (name.includes('cyclonedx') || name === 'bom.json') return 'CycloneDX JSON (.json)';
+        if (name.includes('spdx')) return 'SPDX JSON (.json)';
         return 'JSON (.json)';
       }
       if (name.endsWith('.xml')) {
-        if (name.includes('cyclonedx') || name === 'bom.xml') return 'CycloneDX 1.5 XML (.xml)';
-        if (name.includes('spdx')) return 'SPDX 2.3 XML (.xml)';
+        if (name.includes('cyclonedx') || name === 'bom.xml') return 'CycloneDX XML (.xml)';
+        if (name.includes('spdx')) return 'SPDX XML (.xml)';
         return 'XML (.xml)';
       }
       if (name.endsWith('.zip')) return 'ZIP Archive (.zip)';
@@ -357,7 +359,7 @@ export const SecurityScans: React.FC = () => {
       return 'Local Source Directory';
     }
 
-    return 'CycloneDX 1.5 (JSON)';
+    return 'CycloneDX (JSON)';
   };
 
   // Tooltip State (Excel Sr 9: hover info icons)
@@ -1186,6 +1188,12 @@ export const SecurityScans: React.FC = () => {
                               setLocalFolder([]);
                               setLocalFile(manifests[0]);
                               setSelectedFolder(manifests[0].name);
+                              const name = manifests[0].name.toLowerCase();
+                              if (name.includes('cyclonedx') || name === 'bom.json' || name === 'bom.xml') {
+                                setSbomFormat('CYCLONE DX');
+                              } else if (name.includes('spdx')) {
+                                setSbomFormat('SPDX');
+                              }
                               return;
                             }
                             const items = manifests.map((file) => ({ file, relativePath: file.name }));
@@ -1572,15 +1580,16 @@ export const SecurityScans: React.FC = () => {
                           {sourceType === 'local' ? selectedFolder : sourceType === 'git' ? gitUrl : `${bulkFile.name} (${bulkProjects.length} Projects)`}
                         </span>
                       </div>
-                      <div className="flex justify-between">
+                      <div className="flex justify-between items-center">
                         <span className="text-gray-500">Primary Format:</span>
-                        <span className="font-bold text-blue-600 dark:text-blue-400">{getPrimaryFormatLabel()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Modules Enabled:</span>
-                        <span className="text-gray-900 dark:text-white">
-                          {[vulnScan && 'Vulnerabilities', licenseCheck && 'Licenses', cryptoScan && 'CBOM', signArtifact && 'Signed'].filter(Boolean).join(', ')}
-                        </span>
+                        <select
+                          value={sbomFormat}
+                          onChange={(e) => setSbomFormat(e.target.value as 'SPDX' | 'CYCLONE DX')}
+                          className="font-bold text-blue-600 dark:text-blue-400 bg-transparent text-xs cursor-pointer border border-blue-200 dark:border-blue-800/80 rounded px-2 py-0.5 hover:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors"
+                        >
+                          <option value="SPDX" className="text-gray-900 dark:text-white bg-white dark:bg-gray-800">SPDX</option>
+                          <option value="CYCLONE DX" className="text-gray-900 dark:text-white bg-white dark:bg-gray-800">CYCLONE DX</option>
+                        </select>
                       </div>
                     </div>
                   </div>

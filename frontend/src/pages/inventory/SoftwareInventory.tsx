@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, NavLink, useSearchParams, useLocation } from 'react-router-dom';
 import {
   Package,
@@ -26,6 +26,7 @@ import { useAppState } from '../../context/AppStateContext';
 import { ComponentFieldType, LicenseType, Severity, Ecosystem } from '../../types';
 import { parseUploadedSbom, type ParsedSbomUpload } from './parseUploadedSbom';
 import { UploadInventoryModal } from './UploadInventoryModal';
+import { TablePagination } from '../../components/common/TablePagination';
 
 // Client-side CSV export helper
 const exportTableToCsv = (filename: string, rows: (string | number)[][]) => {
@@ -64,6 +65,10 @@ export const SoftwareInventory: React.FC = () => {
   const [riskFilter, setRiskFilter] = useState(searchParams.get('risk') || 'All Risk Levels');
   const [sourceFilter, setSourceFilter] = useState(searchParams.get('source') || 'All Sources');
   const [showFilters, setShowFilters] = useState(false);
+
+  // Pagination state (Systematic 15, 20, 25, 50, 100 per page)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
 
   // Modals for Top Actions (Excel Sr 12)
   const [ingestModalOpen, setIngestModalOpen] = useState(false);
@@ -187,6 +192,7 @@ export const SoftwareInventory: React.FC = () => {
     setRiskFilter('All Risk Levels');
     setSourceFilter('All Sources');
     setSearchParams({}, { replace: true });
+    setCurrentPage(1);
   };
 
   const kpiComponents = filteredComponents;
@@ -196,6 +202,19 @@ export const SoftwareInventory: React.FC = () => {
     () => kpiComponents.filter((c) => c.riskLevel === 'Critical' || c.riskLevel === 'High').length,
     [kpiComponents],
   );
+
+  // Reset to page 1 whenever filters or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, typeFilter, licenseFilter, riskFilter, sourceFilter]);
+
+  // Pagination calculations
+  const totalItems = filteredComponents.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalItems);
+  const paginatedComponents = filteredComponents.slice(startIndex, endIndex);
 
 
   // Export CSV handler
@@ -772,8 +791,8 @@ export const SoftwareInventory: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {filteredComponents.length > 0 ? (
-                filteredComponents.map((c) => (
+              {paginatedComponents.length > 0 ? (
+                paginatedComponents.map((c) => (
                   <tr key={c.id} className="hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-colors">
                     {/* PROJECT NAME */}
                     <td className="py-3 pl-4 pr-3 whitespace-nowrap">
@@ -887,6 +906,22 @@ export const SoftwareInventory: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Systematic Pagination Controls (15, 20, 25, 50, 100) */}
+        <TablePagination
+          currentPage={safeCurrentPage}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          pageSizeOptions={[15, 20, 25, 50, 100]}
+          onPageChange={(page) => {
+            setCurrentPage(page);
+          }}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setCurrentPage(1);
+          }}
+          itemLabel="components"
+        />
       </div>
 
       {/* ================================================================= */}

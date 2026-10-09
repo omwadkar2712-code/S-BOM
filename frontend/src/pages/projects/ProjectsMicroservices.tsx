@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { ApiError, listProjects, type ApiProjectRow, type ApiProjectSummary } from '../../api/client';
 import { useAppState } from '../../context/AppStateContext';
+import { TablePagination } from '../../components/common/TablePagination';
 
 const EMPTY_SUMMARY: ApiProjectSummary = {
   project_count: 0,
@@ -52,6 +53,21 @@ export const ProjectsMicroservices: React.FC = () => {
   const [projectsList, setProjectsList] = useState<ApiProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const toastOnce = React.useRef(false);
+
+  // Pagination state (Systematic 15, 20, 25, 50, 100 per page)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, pageSize]);
+
+  const totalItems = projectsList.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalItems);
+  const paginatedProjects = projectsList.slice(startIndex, endIndex);
 
   useEffect(() => {
     let cancelled = false;
@@ -286,7 +302,7 @@ export const ProjectsMicroservices: React.FC = () => {
             </thead>
             {projectsList.length > 0 ? (
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {projectsList.map((p) => (
+                {paginatedProjects.map((p) => (
                   <tr key={p.id} className="hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-colors">
                     <td
                       onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(p.name)}`)}
@@ -355,6 +371,20 @@ export const ProjectsMicroservices: React.FC = () => {
             </div>
           )}
         </div>
+
+        {/* Systematic Pagination Controls (15, 20, 25, 50, 100) */}
+        <TablePagination
+          currentPage={safeCurrentPage}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          pageSizeOptions={[15, 20, 25, 50, 100]}
+          onPageChange={(page) => setCurrentPage(page)}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setCurrentPage(1);
+          }}
+          itemLabel="projects"
+        />
       </div>
     </div>
   );

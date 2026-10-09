@@ -20,6 +20,7 @@ import {
   Check,
 } from 'lucide-react';
 import { useAppState } from '../../context/AppStateContext';
+import { TablePagination } from '../../components/common/TablePagination';
 
 // Client-side CSV export helper
 const exportTableToCsv = (filename: string, rows: (string | number)[][]) => {
@@ -116,6 +117,17 @@ export const SBOMArtifacts: React.FC = () => {
 
     return matchesSearch && matchesFormat && matchesProject && matchesStatus;
   });
+
+  // Pagination state (Systematic 15, 20, 25, 50, 100 per page)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  const totalItems = filteredArtifacts.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalItems);
+  const paginatedArtifacts = filteredArtifacts.slice(startIndex, endIndex);
 
   // Open download chooser modal (Excel Sr 21)
   const handleOpenDownloadChooser = (art: SbomArtifact) => {
@@ -467,7 +479,7 @@ export const SBOMArtifacts: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredArtifacts.map((art) => (
+                paginatedArtifacts.map((art) => (
                 <tr
                   key={art.id}
                   className={`transition-colors ${
@@ -550,6 +562,20 @@ export const SBOMArtifacts: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Systematic Pagination Controls (15, 20, 25, 50, 100) */}
+        <TablePagination
+          currentPage={safeCurrentPage}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          pageSizeOptions={[15, 20, 25, 50, 100]}
+          onPageChange={(page) => setCurrentPage(page)}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setCurrentPage(1);
+          }}
+          itemLabel="artifacts"
+        />
       </div>
 
       {/* ========================================================================= */}

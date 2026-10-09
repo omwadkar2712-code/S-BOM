@@ -473,20 +473,20 @@ export const SecurityScans: React.FC = () => {
       : bulkMode === 'file'
         ? uploadedBulk
         : new File(
-            [
-              'project_name,application_name,version,repository_url,branch,authentication_reference,scan_type\n' +
-              manualUrls.map((url) => {
-                const parts = url.split('/').filter(Boolean);
-                const name = parts.pop() || 'app';
-                const owner = parts.pop() || name;
-                return [owner, name, 'UNKNOWN', url, 'main', '', 'GITHUB']
-                  .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-                  .join(',');
-              }).join('\n') + '\n',
-            ],
-            'bulk.csv',
-            { type: 'text/csv' },
-          );
+          [
+            'project_name,application_name,version,repository_url,branch,authentication_reference,scan_type\n' +
+            manualUrls.map((url) => {
+              const parts = url.split('/').filter(Boolean);
+              const name = parts.pop() || 'app';
+              const owner = parts.pop() || name;
+              return [owner, name, 'UNKNOWN', url, 'main', '', 'GITHUB']
+                .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+                .join(',');
+            }).join('\n') + '\n',
+          ],
+          'bulk.csv',
+          { type: 'text/csv' },
+        );
 
     try {
       const firstBulk = bulkProjects.find((row) => !row.rowStatus || row.rowStatus === 'ready') || bulkProjects[0];
@@ -1069,7 +1069,7 @@ export const SecurityScans: React.FC = () => {
                       }}
                       className="mt-4 w-full py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-2xs"
                     >
-                      Choose Folder
+                      Choose Folder/File
                     </button>
                   </div>
 
@@ -1739,13 +1739,12 @@ export const SecurityScans: React.FC = () => {
               {/* Job Summary Banner */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-100 dark:border-gray-800">
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                    scanFailed
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${scanFailed
                       ? 'bg-red-50 dark:bg-red-950/40 text-red-600'
                       : activeScan.status === 'completed'
                         ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600'
                         : 'bg-blue-50 dark:bg-blue-950/60 text-blue-600'
-                  }`}>
+                    }`}>
                     {scanFailed ? <AlertTriangle className="w-5 h-5" /> : activeScan.status === 'completed' ? <CheckCircle2 className="w-5 h-5" /> : <Radio className={`w-5 h-5 ${isOpenStatus(activeScan.status) ? 'animate-pulse' : ''}`} />}
                   </div>
                   <div>
@@ -1756,15 +1755,14 @@ export const SecurityScans: React.FC = () => {
                       <span className="font-mono text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-600 dark:text-gray-300">
                         {activeScan.id}
                       </span>
-                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${
-                        scanFailed
+                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${scanFailed
                           ? 'bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300'
                           : activeScan.status === 'completed'
                             ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
                             : activeScan.status === 'cancelled'
                               ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
                               : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300'
-                      }`}>
+                        }`}>
                         {displayStatus(activeScan.status)}
                       </span>
                     </div>
@@ -2018,8 +2016,8 @@ export const SecurityScans: React.FC = () => {
                             : job.status === 'cancelled'
                               ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
                               : job.status === 'running' || job.status === 'analyzing'
-                              ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
-                              : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                                ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                                : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
                           }`}>
                           {job.status}
                         </span>

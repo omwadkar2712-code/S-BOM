@@ -328,6 +328,14 @@ export const SecurityScans: React.FC = () => {
     setTab('new');
   };
 
+  const handleBackToPrevious = () => {
+    if (window.history.state && typeof window.history.state.idx === 'number' && window.history.state.idx > 0) {
+      navigate(-1);
+    } else {
+      setTab('table');
+    }
+  };
+
   // Computes the correct file format for the selected scan source
   const getPrimaryFormatLabel = (): string => {
     if (sourceType === 'bulk') {
@@ -1178,7 +1186,7 @@ export const SecurityScans: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => openFilePicker()}
-                            className="px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-600 rounded-lg text-xs font-semibold cursor-pointer"
+                            className="px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-600 rounded-lg text-xs font-semibold cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950/60 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-500 dark:hover:border-blue-400 hover:shadow-xs transition-all duration-150"
                           >
                             Choose file
                           </button>
@@ -1689,11 +1697,11 @@ export const SecurityScans: React.FC = () => {
           <div className="flex items-center justify-between pb-1">
             <button
               type="button"
-              onClick={goToLaunchScan}
+              onClick={handleBackToPrevious}
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Launch Scan</span>
+              <span>Back</span>
             </button>
           </div>
           {waitingScans.length > 0 && (
@@ -1771,6 +1779,15 @@ export const SecurityScans: React.FC = () => {
                     <Clock className="w-4 h-4 text-gray-400" />
                     <span>{activeScan.startedAt ? 'Elapsed' : 'Queue'}: <strong className="text-gray-900 dark:text-white font-mono">{activeScan.startedAt ? formatDuration(activeScan.startedAt, isOpenStatus(activeScan.status) ? undefined : activeScan.completedAt, now) : 'Waiting to start'}</strong></span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={handleBackToPrevious}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-gray-50 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer transition-colors shadow-2xs"
+                    title="Back to previous screen"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    Back
+                  </button>
                   {canCancel(activeScan.status) && (
                     <button
                       type="button"
@@ -1911,12 +1928,22 @@ export const SecurityScans: React.FC = () => {
               <p className="text-xs text-gray-500 max-w-sm mx-auto">
                 All scheduled and manual jobs have completed. Launch a new scan from the New Scan tab.
               </p>
-              <button
-                onClick={goToLaunchScan}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer"
-              >
-                + Launch New Scan
-              </button>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleBackToPrevious}
+                  className="px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-xs font-semibold rounded-lg cursor-pointer transition-colors inline-flex items-center gap-1.5"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  Back
+                </button>
+                <button
+                  onClick={goToLaunchScan}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer"
+                >
+                  + Launch New Scan
+                </button>
+              </div>
             </div>
           )}
         </div>

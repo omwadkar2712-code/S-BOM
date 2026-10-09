@@ -429,11 +429,28 @@ export async function createGitHubPat(name: string, token: string): Promise<stri
   return id;
 }
 
+export function severityCounts(rows: Array<{ severity?: string }>): {
+  criticals: number;
+  highs: number;
+  mediums: number;
+  lows: number;
+} {
+  const upper = (value?: string) => (value || '').toUpperCase();
+  return {
+    criticals: rows.filter((row) => upper(row.severity) === 'CRITICAL').length,
+    highs: rows.filter((row) => upper(row.severity) === 'HIGH').length,
+    mediums: rows.filter((row) => upper(row.severity) === 'MEDIUM').length,
+    lows: rows.filter((row) => upper(row.severity) === 'LOW').length,
+  };
+}
+
 export async function scanPackageTotals(scanId: string): Promise<{
   componentsFound: number;
   cvesFound: number;
   criticals: number;
   highs: number;
+  mediums: number;
+  lows: number;
 }> {
   const [comps, vulns] = await Promise.all([
     scanComponents(scanId),
@@ -443,8 +460,7 @@ export async function scanPackageTotals(scanId: string): Promise<{
   return {
     componentsFound: comps.length,
     cvesFound: rows.length,
-    criticals: rows.filter((v) => (v.severity || '').toUpperCase() === 'CRITICAL').length,
-    highs: rows.filter((v) => (v.severity || '').toUpperCase() === 'HIGH').length,
+    ...severityCounts(rows),
   };
 }
 
@@ -484,6 +500,8 @@ export function mapScan(scan: ApiScan): ScanJob {
     cvesFound: 0,
     criticals: 0,
     highs: 0,
+    mediums: 0,
+    lows: 0,
     logMessages: scan.error_message ? [scan.error_message] : [`Stage ${scan.stage || scan.status}`],
     snapshotId: scan.snapshot_id,
     errorCode: scan.error_code || undefined,
@@ -547,6 +565,8 @@ export function mapBulkAggregate(bulk: ApiBulk): ScanJob {
     cvesFound: 0,
     criticals: 0,
     highs: 0,
+    mediums: 0,
+    lows: 0,
     logMessages: [`${completed} completed, ${failed} failed, ${skipped} skipped, ${bulk.total_rows} total`],
     isBulkAggregate: true,
     bulkId: bulk.id,
@@ -573,6 +593,8 @@ export function childJobsFromBulk(bulk: ApiBulk): ScanJob[] {
     cvesFound: 0,
     criticals: 0,
     highs: 0,
+    mediums: 0,
+    lows: 0,
     logMessages: item.error_message ? [item.error_message] : [`${item.status}`],
     bulkId: bulk.id,
     bulkRow: item.row_number,

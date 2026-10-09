@@ -365,7 +365,14 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
     setComponents(prev => mergeByPackage(prev, decorated));
     setVulnerabilities(prev => mergeVulns(prev, mappedVulns));
-    return { components: mapped.length, cves: mappedVulns.length, criticals: mappedVulns.filter(v => v.severity === 'Critical').length, highs: mappedVulns.filter(v => v.severity === 'High').length };
+    return {
+      components: mapped.length,
+      cves: mappedVulns.length,
+      criticals: mappedVulns.filter((v) => v.severity === 'Critical').length,
+      highs: mappedVulns.filter((v) => v.severity === 'High').length,
+      mediums: mappedVulns.filter((v) => v.severity === 'Medium').length,
+      lows: mappedVulns.filter((v) => v.severity === 'Low').length,
+    };
   };
 
   const startScan = async (params: {
@@ -478,6 +485,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       cvesFound: 0,
       criticals: 0,
       highs: 0,
+      mediums: 0,
+      lows: 0,
       logMessages: [`Scan ${createdId} queued`],
     };
     setActiveScan(job);
@@ -499,6 +508,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       cvesFound: 0,
       criticals: 0,
       highs: 0,
+      mediums: 0,
+      lows: 0,
       snapshotId: undefined,
       logMessages: ['Rescan queued'],
       timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
@@ -609,6 +620,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           cvesFound: counts.cves,
           criticals: counts.criticals,
           highs: counts.highs,
+          mediums: counts.mediums,
+          lows: counts.lows,
           status: 'completed',
           progress: 100,
         };

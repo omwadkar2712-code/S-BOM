@@ -241,12 +241,20 @@ class Orchestrator:
             raise ScanCancelled("scan cancelled")
         added = len(snap.get("components") or [])
         skipped = int(snap.get("components_skipped") or 0)
-        self._stage(scan["id"], "COMPLETED", f"scan complete, added {added}, skipped {skipped} existing versions")
+        new_only = max(0, added - skipped)
+        if skipped:
+            self._stage(
+                scan["id"],
+                "COMPLETED",
+                f"scan complete, {added} components ({new_only} new, {skipped} existing versions)",
+            )
+        else:
+            self._stage(scan["id"], "COMPLETED", f"scan complete, {added} components")
         self.audit.record(
             "SCAN_COMPLETED",
             organization_id=scan["organization_id"],
             scan_id=scan["id"],
-            metadata={"components": len(snap.get("components") or [])},
+            metadata={"components": added, "existing_versions": skipped},
         )
         METRICS.add("components_discovered", len(snap.get("components") or []))
 

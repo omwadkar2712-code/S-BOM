@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, NavLink } from 'react-router-dom';
+import React, { useState, useMemo } from 'react';
+import { useNavigate, NavLink, useSearchParams, useLocation } from 'react-router-dom';
 import {
   Package,
   FolderGit2,
@@ -52,14 +52,17 @@ const exportTableToCsv = (filename: string, rows: (string | number)[][]) => {
 
 export const SoftwareInventory: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { addToast, components, projects, setAddDependencyModalOpen, addComponents } = useAppState();
+  const tabSearch = location.search;
 
   // Search and filter state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState('All Types');
-  const [licenseFilter, setLicenseFilter] = useState('All Licenses');
-  const [riskFilter, setRiskFilter] = useState('All Risk Levels');
-  const [sourceFilter, setSourceFilter] = useState('All Sources');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
+  const [typeFilter, setTypeFilter] = useState(searchParams.get('type') || 'All Types');
+  const [licenseFilter, setLicenseFilter] = useState(searchParams.get('license') || 'All Licenses');
+  const [riskFilter, setRiskFilter] = useState(searchParams.get('risk') || 'All Risk Levels');
+  const [sourceFilter, setSourceFilter] = useState(searchParams.get('source') || 'All Sources');
   const [showFilters, setShowFilters] = useState(false);
 
   // Modals for Top Actions (Excel Sr 12)
@@ -152,13 +155,47 @@ export const SoftwareInventory: React.FC = () => {
     return matchSearch && matchType && matchLicense && matchRisk && matchSource;
   });
 
+  const writeFiltersToUrl = (next: {
+    q?: string;
+    type?: string;
+    license?: string;
+    risk?: string;
+    source?: string;
+  }) => {
+    const params = new URLSearchParams(searchParams);
+    const q = next.q !== undefined ? next.q : searchQuery;
+    const type = next.type !== undefined ? next.type : typeFilter;
+    const license = next.license !== undefined ? next.license : licenseFilter;
+    const risk = next.risk !== undefined ? next.risk : riskFilter;
+    const source = next.source !== undefined ? next.source : sourceFilter;
+    const assign = (key: string, value: string, empty: string) => {
+      if (!value || value === empty) params.delete(key);
+      else params.set(key, value);
+    };
+    assign('q', q.trim(), '');
+    assign('type', type, 'All Types');
+    assign('license', license, 'All Licenses');
+    assign('risk', risk, 'All Risk Levels');
+    assign('source', source, 'All Sources');
+    setSearchParams(params, { replace: true });
+  };
+
   const handleResetFilters = () => {
     setSearchQuery('');
     setTypeFilter('All Types');
     setLicenseFilter('All Licenses');
     setRiskFilter('All Risk Levels');
     setSourceFilter('All Sources');
+    setSearchParams({}, { replace: true });
   };
+
+  const kpiComponents = filteredComponents;
+  const uniqueProjects = useMemo(() => new Set(kpiComponents.map((c) => c.projectName)), [kpiComponents]);
+  const vulnerablePackages = useMemo(() => kpiComponents.filter((c) => c.vulnerabilities > 0).length, [kpiComponents]);
+  const auditGaps = useMemo(
+    () => kpiComponents.filter((c) => c.riskLevel === 'Critical' || c.riskLevel === 'High').length,
+    [kpiComponents],
+  );
 
 
   // Export CSV handler
@@ -275,7 +312,7 @@ export const SoftwareInventory: React.FC = () => {
       <div className="border-b border-gray-200 dark:border-gray-800">
         <nav className="flex items-center space-x-2 sm:space-x-3 overflow-x-auto" aria-label="Software Inventory Tabs">
           <NavLink
-            to="/software-inventory"
+            to={`/software-inventory${tabSearch}`}
             end
             className={({ isActive }) =>
               `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
@@ -290,7 +327,7 @@ export const SoftwareInventory: React.FC = () => {
           </NavLink>
 
           <NavLink
-            to="/software-inventory/projects"
+            to={`/software-inventory/projects${tabSearch}`}
             className={({ isActive }) =>
               `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
                 isActive
@@ -304,7 +341,7 @@ export const SoftwareInventory: React.FC = () => {
           </NavLink>
 
           <NavLink
-            to="/software-inventory/artifacts"
+            to={`/software-inventory/artifacts${tabSearch}`}
             className={({ isActive }) =>
               `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
                 isActive
@@ -323,11 +360,7 @@ export const SoftwareInventory: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {/* Card 1: UNIQUE COMPONENTS */}
         <div
-          onClick={() => {
-            setSearchQuery('');
-            setTypeFilter('All Types');
-            setRiskFilter('All Risk Levels');
-          }}
+          onClick={handleResetFilters}
           className="bg-gradient-to-b from-blue-50/40 via-white to-white dark:from-blue-950/20 dark:via-[#111827] dark:to-[#111827] border border-blue-100/90 dark:border-gray-800 hover:border-blue-400 dark:hover:border-blue-500 rounded-xl p-3.5 sm:p-4 shadow-2xs hover:shadow-md hover:shadow-blue-500/5 hover:-translate-y-0.5 transition-all duration-200 min-h-[116px] flex flex-col justify-between cursor-pointer group"
         >
           <div className="flex items-start justify-between gap-1.5">
@@ -359,12 +392,12 @@ export const SoftwareInventory: React.FC = () => {
           <div className="mt-3 flex items-end justify-between">
             <div>
               <h2 className="text-2xl font-black text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-none">
-                {mockComponents.length}
+                {kpiComponents.length}
               </h2>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block"></span>
                 <span>
-                  {mockComponents.filter(c => c.directDependency).length} Direct • {mockComponents.filter(c => !c.directDependency).length} Transitive
+                  {kpiComponents.filter(c => c.directDependency).length} Direct • {kpiComponents.filter(c => !c.directDependency).length} Transitive
                 </span>
               </p>
             </div>
@@ -406,11 +439,11 @@ export const SoftwareInventory: React.FC = () => {
           <div className="mt-3 flex items-end justify-between">
             <div>
               <h2 className="text-2xl font-black text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors leading-none">
-                {new Set(mockComponents.map(c => c.projectName)).size}
+                {uniqueProjects.size}
               </h2>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block"></span>
-                <span>{new Set(mockComponents.map(c => c.projectName)).size} active services</span>
+                <span>{uniqueProjects.size} active services</span>
               </p>
             </div>
             <ArrowRight className="w-3.5 h-3.5 text-indigo-400 dark:text-indigo-500/70 group-hover:text-indigo-600 dark:group-hover:text-indigo-300 group-hover:translate-x-0.5 transition-all mb-0.5 shrink-0" />
@@ -451,11 +484,11 @@ export const SoftwareInventory: React.FC = () => {
           <div className="mt-3 flex items-end justify-between">
             <div>
               <h2 className="text-2xl font-black text-amber-600 dark:text-amber-400 leading-none">
-                {mockComponents.filter(c => c.vulnerabilities > 0).length}
+                {vulnerablePackages}
               </h2>
               <p className="text-[11px] text-amber-700 dark:text-amber-400/90 mt-1 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block animate-pulse"></span>
-                <span>{mockComponents.filter(c => c.vulnerabilities > 0).length} requiring patch</span>
+                <span>{vulnerablePackages} requiring patch</span>
               </p>
             </div>
             <ArrowRight className="w-3.5 h-3.5 text-amber-400 dark:text-amber-500/70 group-hover:text-amber-600 group-hover:translate-x-0.5 transition-all mb-0.5 shrink-0" />
@@ -496,11 +529,11 @@ export const SoftwareInventory: React.FC = () => {
           <div className="mt-3 flex items-end justify-between">
             <div>
               <h2 className="text-2xl font-black text-emerald-600 dark:text-emerald-400 leading-none">
-                {mockComponents.length > 0 ? '100%' : '0%'}
+                {kpiComponents.length > 0 ? '100%' : '0%'}
               </h2>
               <p className="text-[11px] text-emerald-700 dark:text-emerald-400/90 mt-1 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                <span>{mockComponents.length} canonical P-URLs</span>
+                <span>{kpiComponents.length} canonical P-URLs</span>
               </p>
             </div>
             <ArrowRight className="w-3.5 h-3.5 text-emerald-400 dark:text-emerald-500/70 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all mb-0.5 shrink-0" />
@@ -541,11 +574,11 @@ export const SoftwareInventory: React.FC = () => {
           <div className="mt-3 flex items-end justify-between">
             <div>
               <h2 className="text-2xl font-black text-gray-900 dark:text-white group-hover:text-sky-600 transition-colors leading-none">
-                {mockComponents.filter(c => c.riskLevel === 'Critical' || c.riskLevel === 'High').length}
+                {auditGaps}
               </h2>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-sky-500 inline-block"></span>
-                <span>{mockComponents.filter(c => c.riskLevel === 'Critical' || c.riskLevel === 'High').length} audit gaps</span>
+                <span>{auditGaps} audit gaps</span>
               </p>
             </div>
             <ArrowRight className="w-3.5 h-3.5 text-sky-400 dark:text-sky-500/70 group-hover:text-sky-600 group-hover:translate-x-0.5 transition-all mb-0.5 shrink-0" />
@@ -564,7 +597,11 @@ export const SoftwareInventory: React.FC = () => {
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setSearchQuery(next);
+                  writeFiltersToUrl({ q: next });
+                }}
                 placeholder="Search for components, packages, versions, licenses, or P-URL..."
                 className="w-full pl-9 pr-4 py-2 text-xs bg-gray-50/70 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 hover:border-blue-300 dark:hover:border-blue-700 transition-colors shadow-2xs"
               />
@@ -637,7 +674,10 @@ export const SoftwareInventory: React.FC = () => {
 
               <select
                 value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
+                onChange={(e) => {
+                  setTypeFilter(e.target.value);
+                  writeFiltersToUrl({ type: e.target.value });
+                }}
                 className="text-xs px-2.5 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs hover:border-blue-300 transition-colors"
               >
                 <option value="All Types">All Types</option>
@@ -656,7 +696,10 @@ export const SoftwareInventory: React.FC = () => {
 
               <select
                 value={licenseFilter}
-                onChange={(e) => setLicenseFilter(e.target.value)}
+                onChange={(e) => {
+                  setLicenseFilter(e.target.value);
+                  writeFiltersToUrl({ license: e.target.value });
+                }}
                 className="text-xs px-2.5 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs hover:border-blue-300 transition-colors"
               >
                 <option value="All Licenses">All Licenses</option>
@@ -668,7 +711,10 @@ export const SoftwareInventory: React.FC = () => {
 
               <select
                 value={riskFilter}
-                onChange={(e) => setRiskFilter(e.target.value)}
+                onChange={(e) => {
+                  setRiskFilter(e.target.value);
+                  writeFiltersToUrl({ risk: e.target.value });
+                }}
                 className="text-xs px-2.5 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs hover:border-blue-300 transition-colors"
               >
                 <option value="All Risk Levels">All Risk Levels</option>
@@ -681,7 +727,10 @@ export const SoftwareInventory: React.FC = () => {
 
               <select
                 value={sourceFilter}
-                onChange={(e) => setSourceFilter(e.target.value)}
+                onChange={(e) => {
+                  setSourceFilter(e.target.value);
+                  writeFiltersToUrl({ source: e.target.value });
+                }}
                 className="text-xs px-2.5 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs hover:border-blue-300 transition-colors"
               >
                 <option value="All Sources">All Sources</option>

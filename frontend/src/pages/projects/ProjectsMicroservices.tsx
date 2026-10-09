@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import {
   FolderGit2,
   Package,
@@ -42,9 +42,12 @@ function relativeTime(iso: string): string {
 
 export const ProjectsMicroservices: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { addToast } = useAppState();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All Statuses');
+  const tabSearch = location.search;
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'All Statuses');
   const [summary, setSummary] = useState<ApiProjectSummary>(EMPTY_SUMMARY);
   const [projectsList, setProjectsList] = useState<ApiProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,7 +102,7 @@ export const ProjectsMicroservices: React.FC = () => {
       <div className="border-b border-gray-200 dark:border-gray-800">
         <nav className="flex items-center space-x-2 sm:space-x-3 overflow-x-auto" aria-label="Software Inventory Tabs">
           <NavLink
-            to="/software-inventory"
+            to={`/software-inventory${tabSearch}`}
             end
             className={({ isActive }) =>
               `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
@@ -114,7 +117,7 @@ export const ProjectsMicroservices: React.FC = () => {
           </NavLink>
 
           <NavLink
-            to="/software-inventory/projects"
+            to={`/software-inventory/projects${tabSearch}`}
             className={({ isActive }) =>
               `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
                 isActive
@@ -128,7 +131,7 @@ export const ProjectsMicroservices: React.FC = () => {
           </NavLink>
 
           <NavLink
-            to="/software-inventory/artifacts"
+            to={`/software-inventory/artifacts${tabSearch}`}
             className={({ isActive }) =>
               `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
                 isActive
@@ -234,7 +237,14 @@ export const ProjectsMicroservices: React.FC = () => {
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setSearchQuery(next);
+                  const params = new URLSearchParams(searchParams);
+                  if (next.trim()) params.set('q', next.trim());
+                  else params.delete('q');
+                  setSearchParams(params, { replace: true });
+                }}
                 placeholder="Search projects"
                 className="pl-9 pr-3 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
@@ -242,7 +252,14 @@ export const ProjectsMicroservices: React.FC = () => {
 
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setStatusFilter(next);
+                const params = new URLSearchParams(searchParams);
+                if (next && next !== 'All Statuses') params.set('status', next);
+                else params.delete('status');
+                setSearchParams(params, { replace: true });
+              }}
               className="text-xs px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 cursor-pointer focus:outline-none"
             >
               <option value="All Statuses">All Statuses</option>
@@ -259,7 +276,7 @@ export const ProjectsMicroservices: React.FC = () => {
               <tr className="text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800">
                 <th className="pb-3 pr-4 font-semibold whitespace-nowrap">NAME</th>
                 <th className="pb-3 px-4 font-semibold whitespace-nowrap">CLASSIFIER</th>
-                <th className="pb-3 px-4 font-semibold whitespace-nowrap">RISK</th>
+                <th className="pb-3 px-4 font-semibold whitespace-nowrap">AVG RISK LEVEL</th>
                 <th className="pb-3 px-4 font-semibold whitespace-nowrap">COMPLIANCE</th>
                 <th className="pb-3 px-4 font-semibold whitespace-nowrap">VULNS</th>
                 <th className="pb-3 px-4 font-semibold whitespace-nowrap">SCANS</th>
@@ -329,6 +346,7 @@ export const ProjectsMicroservices: React.FC = () => {
                 onClick={() => {
                   setSearchQuery('');
                   setStatusFilter('All Statuses');
+                  setSearchParams({}, { replace: true });
                 }}
                 className="px-3.5 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
               >

@@ -100,19 +100,41 @@ def _run_local(app, client, application: str, manifest: dict) -> str:
     return created.json()["data"]["scan_id"]
 
 
-def test_same_package_version_is_not_stored_twice(tmp_path):
+def test_same_package_version_is_recorded_on_each_scan(tmp_path):
     _fresh(tmp_path / "objects")
     app = build()
     client = TestClient(app)
-    _run_local(app, client, "demo-app", {"name": "demo", "version": "1.0.0", "dependencies": {"left-pad": "1.3.0"}})
-    assert _component_versions("left-pad") == ["1.3.0"]
+    headers = {"X-Organization-Id": "default"}
+    first = _run_local(app, client, "demo-app", {"name": "demo", "version": "1.0.0", "dependencies": {"left-pad": "1.3.0"}})
+    second = _run_local(
+        app,
+        client,
+        "other-app",
+        {"name": "other", "version": "1.0.0", "dependencies": {"left-pad": "1.3.0", "lodash": "4.17.21"}},
+    )
 
-    _run_local(app, client, "other-app", {"name": "other", "version": "1.0.0", "dependencies": {"left-pad": "1.3.0", "lodash": "4.17.21"}})
-    assert _component_versions("left-pad") == ["1.3.0"]
-    assert _component_versions("lodash") == ["4.17.21"]
+    first_names = {row["name"] for row in client.get(f"/api/v1/scans/{first}/components", headers=headers).json()["data"]}
+    second_comps = client.get(f"/api/v1/scans/{second}/components", headers=headers).json()["data"]
+    second_names = {row["name"] for row in second_comps}
+    assert "left-pad" in first_names
+    assert "left-pad" in second_names
+    assert "lodash" in second_names
+    assert len([row for row in second_comps if row["name"] == "left-pad"]) == 1
 
-    _run_local(app, client, "third-app", {"name": "third", "version": "2.0.0", "dependencies": {"left-pad": "1.4.0"}})
-    assert _component_versions("left-pad") == ["1.3.0", "1.4.0"]
+    exported = client.get(f"/api/v1/scans/{second}/export?format=csv", headers=headers, follow_redirects=True)
+    assert exported.status_code == 200
+    assert b"left-pad" in exported.content
+    assert b"lodash" in exported.content
+
+    third = _run_local(app, client, "third-app", {"name": "third", "version": "2.0.0", "dependencies": {"left-pad": "1.4.0"}})
+    third_versions = {
+        row["version"]
+        for row in client.get(f"/api/v1/scans/{third}/components", headers=headers).json()["data"]
+        if row["name"] == "left-pad"
+    }
+    assert third_versions == {"1.4.0"}
+    assert "1.3.0" in _component_versions("left-pad")
+    assert "1.4.0" in _component_versions("left-pad")
 
 
 def test_folder_zip_and_parsers(tmp_path):

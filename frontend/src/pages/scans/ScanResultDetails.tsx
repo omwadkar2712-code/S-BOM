@@ -92,6 +92,12 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
   const [loadingResults, setLoadingResults] = useState(false);
   const [componentTotal, setComponentTotal] = useState(job.componentsFound || 0);
   const [vulnTotal, setVulnTotal] = useState(job.cvesFound || 0);
+  const [severityTotals, setSeverityTotals] = useState({
+    criticals: job.criticals || 0,
+    highs: job.highs || 0,
+    mediums: job.mediums || 0,
+    lows: job.lows || 0,
+  });
   const viewJob: ScanJob = { ...job, events: events?.length ? events : job.events };
   const settled = job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled';
   const duration = formatDuration(job.startedAt, settled ? job.completedAt : undefined, now);
@@ -102,8 +108,10 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
       cves: sum.cves + (scan.cvesFound || 0),
       criticals: sum.criticals + (scan.criticals || 0),
       highs: sum.highs + (scan.highs || 0),
+      mediums: sum.mediums + (scan.mediums || 0),
+      lows: sum.lows + (scan.lows || 0),
     }),
-    { components: 0, cves: 0, criticals: 0, highs: 0 },
+    { components: 0, cves: 0, criticals: 0, highs: 0, mediums: 0, lows: 0 },
   );
 
   useEffect(() => {
@@ -133,6 +141,12 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
     if (job.isBulkAggregate || job.status !== 'completed') {
       setComponents([]);
       setVulns([]);
+      setSeverityTotals({
+        criticals: job.criticals || 0,
+        highs: job.highs || 0,
+        mediums: job.mediums || 0,
+        lows: job.lows || 0,
+      });
       return;
     }
     let cancelled = false;
@@ -144,8 +158,15 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
           api.scanVulnerabilities(job.id).catch(() => []),
         ]);
         if (cancelled) return;
+        const mappedVulns = api.mapVulns(matches, comps || [], job.targetProject);
         setComponentTotal((comps || []).length);
-        setVulnTotal(Array.isArray(matches) ? matches.length : 0);
+        setVulnTotal(mappedVulns.length);
+        setSeverityTotals({
+          criticals: mappedVulns.filter((item) => item.severity === 'Critical').length,
+          highs: mappedVulns.filter((item) => item.severity === 'High').length,
+          mediums: mappedVulns.filter((item) => item.severity === 'Medium').length,
+          lows: mappedVulns.filter((item) => item.severity === 'Low').length,
+        });
         setComponents((comps || []).slice(0, 8).map((component) => ({
           id: component.id,
           name: component.name,
@@ -153,13 +174,19 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
           ecosystem: component.ecosystem,
           direct: component.direct,
         })));
-        setVulns(api.mapVulns(matches, comps || [], job.targetProject).slice(0, 8));
+        setVulns(mappedVulns.slice(0, 8));
       } catch {
         if (!cancelled) {
           setComponents([]);
           setComponentTotal(job.componentsFound || 0);
           setVulns([]);
           setVulnTotal(job.cvesFound || 0);
+          setSeverityTotals({
+            criticals: job.criticals || 0,
+            highs: job.highs || 0,
+            mediums: job.mediums || 0,
+            lows: job.lows || 0,
+          });
         }
       } finally {
         if (!cancelled) setLoadingResults(false);
@@ -218,7 +245,15 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
           <BulkRows items={items} related={related} totals={childTotals} onOpenScan={onOpenScan} />
         ) : (
           <SingleResults
-            job={{ ...job, componentsFound: componentTotal || job.componentsFound, cvesFound: vulnTotal || job.cvesFound }}
+            job={{
+              ...job,
+              componentsFound: componentTotal || job.componentsFound,
+              cvesFound: vulnTotal || job.cvesFound,
+              criticals: severityTotals.criticals,
+              highs: severityTotals.highs,
+              mediums: severityTotals.mediums,
+              lows: severityTotals.lows,
+            }}
             loading={loadingResults}
             components={components}
             vulns={vulns}
@@ -306,11 +341,13 @@ const SingleResults: React.FC<{
   vulns: Vulnerability[];
 }> = ({ job, loading, components, vulns }) => (
   <div className="space-y-3">
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
       <Stat label="Components" value={job.componentsFound || 0} />
       <Stat label="Findings" value={job.cvesFound || 0} />
       <Stat label="Critical" value={job.criticals || 0} tone="text-red-600 dark:text-red-400" />
       <Stat label="High" value={job.highs || 0} tone="text-orange-500 dark:text-orange-400" />
+      <Stat label="Medium" value={job.mediums || 0} tone="text-amber-500 dark:text-amber-400" />
+      <Stat label="Low" value={job.lows || 0} tone="text-sky-500 dark:text-sky-400" />
     </div>
     {job.status === 'completed' && (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -365,7 +402,7 @@ const SingleResults: React.FC<{
 const BulkRows: React.FC<{
   items: BulkScanItemView[];
   related: ScanJob[];
-  totals: { components: number; cves: number; criticals: number; highs: number };
+  totals: { components: number; cves: number; criticals: number; highs: number; mediums: number; lows: number };
   onOpenScan: (id: string) => void;
 }> = ({ items, related, totals, onOpenScan }) => {
   const counts = items.reduce(
@@ -390,7 +427,7 @@ const BulkRows: React.FC<{
         <Stat label="Skipped" value={counts.skipped + counts.cancelled} />
       </div>
       <p className="text-[11px] text-gray-500">
-        Batch totals from finished rows: {totals.components} components, {totals.cves} findings, {totals.criticals} critical, {totals.highs} high.
+        Batch totals from finished rows: {totals.components} components, {totals.cves} findings, {totals.criticals} critical, {totals.highs} high, {totals.mediums} medium, {totals.lows} low.
       </p>
       <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
         <table className="w-full text-left text-xs min-w-[640px]">

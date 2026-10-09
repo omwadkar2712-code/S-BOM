@@ -491,12 +491,17 @@ class BomRepo:
             )
             now = iso(utcnow())
             known = self._known_package_keys(snap.get("organization_id") or "")
+            seen_in_snapshot: set[tuple[str, str, str]] = set()
             kept: list[dict[str, Any]] = []
             discovered = snap.get("components") or []
+            skipped_existing = 0
             for comp in discovered:
                 key = _package_key(comp)
-                if key in known:
+                if key in seen_in_snapshot:
                     continue
+                seen_in_snapshot.add(key)
+                if key in known:
+                    skipped_existing += 1
                 known.add(key)
                 kept.append(comp)
                 self.db.execute(
@@ -521,7 +526,7 @@ class BomRepo:
             snap["dependencies"] = kept_deps
             persist_snapshot_facts(self.db, snap, kept)
             snap["components"] = kept
-            snap["components_skipped"] = len(discovered) - len(kept)
+            snap["components_skipped"] = skipped_existing
             self.db.commit()
         except Exception:
             if self.db.in_transaction:

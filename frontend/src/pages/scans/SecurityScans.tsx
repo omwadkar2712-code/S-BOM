@@ -293,6 +293,39 @@ export const SecurityScans: React.FC = () => {
   const [cryptoScan, setCryptoScan] = useState(true);
   const [signArtifact, setSignArtifact] = useState(true);
 
+  const resetLaunchForm = () => {
+    setNewScanStep('input');
+    setSelectedProject(null);
+    setSelectedApplication(null);
+    setReleaseVersion('');
+    setDescription('');
+    setSourceType('local');
+    setSelectedFolder('');
+    setLocalFile(null);
+    setLocalFolder([]);
+    setGitUrl('');
+    setGitBranch('main');
+    setGitToken('');
+    setUploadedBulk(null);
+    setBulkMode('file');
+    setBulkFileError('');
+    setBulkProjects([]);
+    setBulkFile({
+      name: 'squad1_bulk_scan_template.csv',
+      size: '0.8 KB',
+      rowCount: 0,
+      uploadedAt: 'Sample Template',
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (folderInputRef.current) folderInputRef.current.value = '';
+    if (bulkFileInputRef.current) bulkFileInputRef.current.value = '';
+  };
+
+  const goToLaunchScan = () => {
+    resetLaunchForm();
+    setTab('new');
+  };
+
   // Computes the correct file format for the selected scan source
   const getPrimaryFormatLabel = (): string => {
     if (sourceType === 'bulk') {
@@ -464,7 +497,10 @@ export const SecurityScans: React.FC = () => {
       });
 
       setIsSubmitting(false);
-      if (scanId) setTab('live');
+      if (scanId) {
+        resetLaunchForm();
+        setTab('live');
+      }
     } catch (err) {
       setIsSubmitting(false);
       addToast({
@@ -687,7 +723,7 @@ export const SecurityScans: React.FC = () => {
               {/* Right: ONLY ONE BUTTON: Launch Scan (No components count pill!) */}
               <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                 <button
-                  onClick={() => setTab('new')}
+                  onClick={goToLaunchScan}
                   className="px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg flex items-center gap-1.5 shadow-sm shadow-blue-500/20 cursor-pointer transition-all whitespace-nowrap"
                   title="Launch Security Scan"
                 >
@@ -1641,6 +1677,16 @@ export const SecurityScans: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'live' && (
         <div className="space-y-6">
+          <div className="flex items-center justify-between pb-1">
+            <button
+              type="button"
+              onClick={goToLaunchScan}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Launch Scan</span>
+            </button>
+          </div>
           {waitingScans.length > 0 && (
             <div className="bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-xl shadow-2xs overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
@@ -1817,11 +1863,13 @@ export const SecurityScans: React.FC = () => {
               )}
 
               {activeScan.status === 'completed' && !activeScan.isBulkAggregate && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
                   <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Components</p><p className="text-lg font-bold text-gray-900 dark:text-white">{activeScan.componentsFound}</p></div>
                   <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Findings</p><p className="text-lg font-bold text-gray-900 dark:text-white">{activeScan.cvesFound}</p></div>
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Critical</p><p className="text-lg font-bold text-red-600">{activeScan.criticals}</p></div>
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">High</p><p className="text-lg font-bold text-orange-500">{activeScan.highs}</p></div>
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Critical</p><p className="text-lg font-bold text-red-600">{activeScan.criticals || 0}</p></div>
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">High</p><p className="text-lg font-bold text-orange-500">{activeScan.highs || 0}</p></div>
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Medium</p><p className="text-lg font-bold text-amber-500">{activeScan.mediums || 0}</p></div>
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Low</p><p className="text-lg font-bold text-sky-500">{activeScan.lows || 0}</p></div>
                 </div>
               )}
 
@@ -1855,7 +1903,7 @@ export const SecurityScans: React.FC = () => {
                 All scheduled and manual jobs have completed. Launch a new scan from the New Scan tab.
               </p>
               <button
-                onClick={() => setTab('new')}
+                onClick={goToLaunchScan}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer"
               >
                 + Launch New Scan
@@ -1947,7 +1995,9 @@ export const SecurityScans: React.FC = () => {
                       <td className="py-3 font-semibold text-gray-900 dark:text-white">{job.componentsFound}</td>
                       <td className="py-3">
                         <span className="text-red-600 dark:text-red-400 font-semibold">{job.criticals || 0} Crit</span> •{' '}
-                        <span className="text-orange-500 dark:text-orange-400 font-semibold">{job.highs || 0} High</span>
+                        <span className="text-orange-500 dark:text-orange-400 font-semibold">{job.highs || 0} High</span> •{' '}
+                        <span className="text-amber-500 dark:text-amber-400 font-semibold">{job.mediums || 0} Med</span> •{' '}
+                        <span className="text-sky-500 dark:text-sky-400 font-semibold">{job.lows || 0} Low</span>
                       </td>
                       <td className="py-3 text-right">
                         <div className="inline-flex items-center justify-end">

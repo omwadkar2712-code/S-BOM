@@ -5,6 +5,7 @@ import {
   Eye,
   Download,
   FileCode,
+  FileSpreadsheet,
   Layers,
   ChevronRight,
   RotateCcw,
@@ -14,7 +15,7 @@ import type { ScanJob } from '../../types';
 export interface ScanActionMenuProps {
   scan: ScanJob;
   onViewDetails: (scan: ScanJob) => void;
-  onExport: (format: 'spdx' | 'cyclonedx', scanId: string) => void;
+  onExport: (format: 'spdx' | 'cyclonedx' | 'csv', scanId: string) => void;
   onRescan?: (scan: ScanJob) => void;
   rescanning?: boolean;
 }
@@ -41,7 +42,7 @@ export const ScanActionMenu: React.FC<ScanActionMenuProps> = ({
     if (!buttonRef.current) return;
     const rect = buttonRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const openUpwards = spaceBelow < 280 && rect.top > 280;
+    const openUpwards = spaceBelow < 340 && rect.top > 340;
 
     setMenuCoords({
       top: openUpwards ? undefined : rect.bottom + 6,
@@ -119,6 +120,12 @@ export const ScanActionMenu: React.FC<ScanActionMenuProps> = ({
     e.stopPropagation();
     setIsOpen(false);
     onExport('cyclonedx', scan.id);
+  };
+
+  const handleExportCSV = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsOpen(false);
+    onExport('csv', scan.id);
   };
 
   return (
@@ -267,6 +274,28 @@ export const ScanActionMenu: React.FC<ScanActionMenuProps> = ({
                       </div>
                     </div>
                     <Download className="w-3.5 h-3.5 text-gray-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 shrink-0" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportCSV}
+                    className="w-full text-left px-2.5 py-1.5 text-xs rounded-lg text-gray-700 dark:text-gray-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center justify-between gap-2 transition-colors cursor-pointer group"
+                    title="Download scan findings as CSV"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-5 h-5 rounded bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                        <FileSpreadsheet className="w-3 h-3" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-gray-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 text-[11px]">
+                          CSV format
+                        </div>
+                        <div className="text-[9px] text-gray-400 dark:text-gray-500">
+                          Components & findings
+                        </div>
+                      </div>
+                    </div>
+                    <Download className="w-3.5 h-3.5 text-gray-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 shrink-0" />
                   </button>
                 </div>
               )}

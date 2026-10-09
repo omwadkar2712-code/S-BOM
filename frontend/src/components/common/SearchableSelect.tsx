@@ -65,7 +65,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const display = open ? query : value?.name || '';
+  const display = open ? (query || value?.name || '') : (value?.name || '');
   const shownPlaceholder = disabled && disabledPlaceholder ? disabledPlaceholder : placeholder;
   const trimmed = query.trim();
   const exactMatch = options.some((option) => option.name.toLowerCase() === trimmed.toLowerCase());
@@ -154,7 +154,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
             setQuery(next);
             setOpen(true);
             onQueryChange?.(next);
-            if (value && next !== value.name) onChange(null);
+            if (value && next.trim() !== '' && next !== value.name) onChange(null);
           }}
           onKeyDown={(event) => {
             if (disabled) return;

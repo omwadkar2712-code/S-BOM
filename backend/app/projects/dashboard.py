@@ -114,22 +114,28 @@ def list_projects(
             continue
         filtered.append(row)
 
-    project_count = len(projects)
+    visible = filtered
+    project_count = len(visible)
     avg = 0.0
     if project_count:
-        avg = round(sum(p["compliance_pct"] for p in projects) / project_count, 1)
+        avg = round(sum(p["compliance_pct"] for p in visible) / project_count, 1)
+    compliant_visible = sum(
+        1 for p in visible if p.get("component_count", 0) > 0 and float(p.get("compliance_pct") or 0) >= 80.0
+    )
+    scans_visible = sum(int(p.get("scans") or 0) for p in visible)
+    sbom_visible = sum(1 for p in visible if p.get("latest_snapshot_id"))
 
     return {
         "summary": {
             "project_count": project_count,
             "active_projects": project_count,
             "avg_compliance_pct": avg,
-            "compliant_count": compliant_projects,
+            "compliant_count": compliant_visible,
             "total_count": project_count,
-            "total_scans": total_scans,
-            "sbom_files": sbom_files,
+            "total_scans": scans_visible if (query or status_key) else total_scans,
+            "sbom_files": sbom_visible if (query or status_key) else sbom_files,
         },
-        "projects": filtered,
+        "projects": visible,
     }
 
 
@@ -156,6 +162,8 @@ def _empty_stats() -> dict[str, Any]:
         "vuln_count": 0,
         "vuln_critical": 0,
         "vuln_high": 0,
+        "vuln_medium": 0,
+        "vuln_low": 0,
         "compliant_components": 0,
         "component_count": 0,
         "compliance_pct": 0.0,
@@ -167,6 +175,8 @@ def _snapshot_stats(snap: dict[str, Any]) -> dict[str, Any]:
     seen = set()
     critical = 0
     high = 0
+    medium = 0
+    low = 0
     for match in matches:
         vid = str(match.get("vulnerability_id") or "")
         if not vid or vid in seen:
@@ -177,6 +187,10 @@ def _snapshot_stats(snap: dict[str, Any]) -> dict[str, Any]:
             critical += 1
         elif sev == "HIGH":
             high += 1
+        elif sev == "MEDIUM":
+            medium += 1
+        elif sev == "LOW":
+            low += 1
     comps = snap.get("components") or []
     compliant = 0
     for comp in comps:
@@ -189,6 +203,8 @@ def _snapshot_stats(snap: dict[str, Any]) -> dict[str, Any]:
         "vuln_count": len(seen),
         "vuln_critical": critical,
         "vuln_high": high,
+        "vuln_medium": medium,
+        "vuln_low": low,
         "compliant_components": compliant,
         "component_count": total,
         "compliance_pct": pct,

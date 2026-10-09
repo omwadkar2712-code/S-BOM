@@ -162,10 +162,12 @@ def test_projects_status_and_search_filters():
     )
     high = list_projects(scans, boms, "default", status="High Risk")
     assert [row["name"] for row in high["projects"]] == ["Alpha"]
-    assert high["summary"]["project_count"] == 2
+    assert high["summary"]["project_count"] == 1
+    assert high["summary"]["total_scans"] == 1
 
     search = list_projects(scans, boms, "default", q="beta")
     assert [row["name"] for row in search["projects"]] == ["Beta Service"]
+    assert search["summary"]["project_count"] == 1
 
 
 def test_mitre_targets_still_cover_project_components():

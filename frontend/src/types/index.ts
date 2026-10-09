@@ -220,6 +220,8 @@ export interface ScanJob {
   cvesFound: number;
   criticals: number;
   highs: number;
+  mediums: number;
+  lows: number;
   duration?: string;
   logMessages: string[];
   events?: ScanEventView[];

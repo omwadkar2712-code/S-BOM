@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation, useSearchParams } from 'react-router-dom';
 import {
   FileText,
   Layers,
@@ -71,9 +71,12 @@ interface SbomArtifact {
 
 export const SBOMArtifacts: React.FC = () => {
   const { addToast } = useAppState();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabSearch = location.search;
 
   // Search & Filter state
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [selectedFormat, setSelectedFormat] = useState('All Formats');
   const [selectedProject, setSelectedProject] = useState('All Projects');
   const [selectedStatus, setSelectedStatus] = useState('All Status');
@@ -242,7 +245,7 @@ export const SBOMArtifacts: React.FC = () => {
       <div className="border-b border-gray-200 dark:border-gray-800">
         <nav className="flex items-center space-x-2 sm:space-x-3 overflow-x-auto" aria-label="Software Inventory Tabs">
           <NavLink
-            to="/software-inventory"
+            to={`/software-inventory${tabSearch}`}
             end
             className={({ isActive }) =>
               `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
@@ -257,7 +260,7 @@ export const SBOMArtifacts: React.FC = () => {
           </NavLink>
 
           <NavLink
-            to="/software-inventory/projects"
+            to={`/software-inventory/projects${tabSearch}`}
             className={({ isActive }) =>
               `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
                 isActive
@@ -271,7 +274,7 @@ export const SBOMArtifacts: React.FC = () => {
           </NavLink>
 
           <NavLink
-            to="/software-inventory/artifacts"
+            to={`/software-inventory/artifacts${tabSearch}`}
             className={({ isActive }) =>
               `flex items-center gap-2 py-2.5 px-3.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
                 isActive
@@ -378,7 +381,14 @@ export const SBOMArtifacts: React.FC = () => {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSearchQuery(next);
+                const params = new URLSearchParams(searchParams);
+                if (next.trim()) params.set('q', next.trim());
+                else params.delete('q');
+                setSearchParams(params, { replace: true });
+              }}
               placeholder="Search file or project"
               className="w-full pl-9 pr-3 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             />

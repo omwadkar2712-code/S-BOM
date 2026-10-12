@@ -98,6 +98,7 @@ export const SecurityScans: React.FC = () => {
   // SUB-PAGE 1: NEW SCAN (2-Stage Input & Review Flow as per Excel Sr 5)
   // =========================================================================
   const [newScanStep, setNewScanStep] = useState<'input' | 'review'>('input');
+  const [launchFormKey, setLaunchFormKey] = useState(0);
 
   // Form State: Project Information
   const [selectedProject, setSelectedProject] = useState<CatalogRecord | null>(null);
@@ -325,15 +326,9 @@ export const SecurityScans: React.FC = () => {
 
   const goToLaunchScan = () => {
     resetLaunchForm();
+    setLaunchFormKey((key) => key + 1);
     setTab('new');
-  };
-
-  const handleBackToPrevious = () => {
-    if (window.history.state && typeof window.history.state.idx === 'number' && window.history.state.idx > 0) {
-      navigate(-1);
-    } else {
-      setTab('table');
-    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Computes the correct file format for the selected scan source
@@ -929,7 +924,7 @@ export const SecurityScans: React.FC = () => {
       {/* 1. NEW SCAN SUB-PAGE                                                      */}
       {/* ========================================================================= */}
       {activeTab === 'new' && (
-        <div className="space-y-6">
+        <div key={launchFormKey} className="space-y-6">
           <div className="flex items-center justify-between pb-1">
             <button
               type="button"
@@ -1697,8 +1692,9 @@ export const SecurityScans: React.FC = () => {
           <div className="flex items-center justify-between pb-1">
             <button
               type="button"
-              onClick={handleBackToPrevious}
+              onClick={goToLaunchScan}
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors"
+              title="Back to Launch Scan"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Back</span>
@@ -1779,9 +1775,9 @@ export const SecurityScans: React.FC = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={handleBackToPrevious}
+                    onClick={goToLaunchScan}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-gray-50 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer transition-colors shadow-2xs"
-                    title="Back to previous screen"
+                    title="Back to Launch Scan"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" />
                     Back
@@ -1929,8 +1925,9 @@ export const SecurityScans: React.FC = () => {
               <div className="flex items-center justify-center gap-3">
                 <button
                   type="button"
-                  onClick={handleBackToPrevious}
+                  onClick={goToLaunchScan}
                   className="px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-xs font-semibold rounded-lg cursor-pointer transition-colors inline-flex items-center gap-1.5"
+                  title="Back to Launch Scan"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
                   Back

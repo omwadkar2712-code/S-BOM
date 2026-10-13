@@ -60,6 +60,7 @@ export interface Vulnerability {
   scanVersion?: string;
   sbomVersion?: string;
   statusChanges?: string;
+  owner?: string;
 }
 
 export type ComponentFieldType =

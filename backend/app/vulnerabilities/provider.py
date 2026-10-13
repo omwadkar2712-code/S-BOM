@@ -89,7 +89,9 @@ class VulnProvider:
                     for rng in affected.get("ranges") or []:
                         for event in rng.get("events") or []:
                             if event.get("fixed"):
-                                fixed = event["fixed"]
+                                val = str(event["fixed"]).strip()
+                                if val and val not in {"*", "None", "unknown"}:
+                                    fixed = val
                 record = {
                     "component_id": comp["id"],
                     "vulnerability_id": vuln.get("id") or "",
@@ -334,7 +336,9 @@ def _fixed_for(adv: dict, name: str) -> str:
         for rng in affected.get("ranges") or []:
             for event in rng.get("events") or []:
                 if event.get("fixed"):
-                    fixed = event["fixed"]
+                    val = str(event["fixed"]).strip()
+                    if val and val not in {"*", "None", "unknown"}:
+                        fixed = val
         if not fixed:
             continue
         pkg = ((affected.get("package") or {}).get("name") or "")
@@ -398,13 +402,17 @@ def _first_cvss(metrics: list) -> dict | None:
 def _fixed_version(block: dict) -> str:
     for affected in block.get("affected") or []:
         for version in affected.get("versions") or []:
-            if version.get("lessThan"):
-                return version["lessThan"]
-            if version.get("lessThanOrEqual"):
-                return version["lessThanOrEqual"]
-            text = str(version.get("version") or "")
+            lt = str(version.get("lessThan") or "").strip()
+            if lt and lt not in {"*", "None", "unknown"}:
+                return lt
+            lte = str(version.get("lessThanOrEqual") or "").strip()
+            if lte and lte not in {"*", "None", "unknown"}:
+                return lte
+            text = str(version.get("version") or "").strip()
             if text.lower().startswith("prior to "):
-                return text[len("prior to ") :].strip()
+                val = text[len("prior to ") :].strip()
+                if val and val not in {"*", "None", "unknown"}:
+                    return val
     return ""
 
 

@@ -102,6 +102,8 @@ export interface ApiVulnMatch {
   cvss_vector?: string;
   description?: string;
   fixed_version?: string;
+  status?: string;
+  vex_status?: string;
 }
 
 export interface ApiEvent {
@@ -735,6 +737,26 @@ function titleSeverity(s?: string): Severity {
   }
 }
 
+export function extractVulnName(desc?: string, fallbackId = ''): string {
+  if (!desc || !desc.trim()) return fallbackId;
+  const trimmed = desc.trim();
+
+  // If multiline, take first line
+  const firstLine = trimmed.split(/\r?\n+/)[0].trim();
+
+  // Match first real sentence: ends in punctuation (.!?) followed by whitespace + Capital letter, or end of string.
+  // Avoids breaking on version numbers (e.g. 2.19.3), Node.js, e.g., i.e.
+  const sentenceMatch = trimmed.match(/^(.+?[a-zA-Z0-9\)])\.(?:\s+[A-Z]|\s*$)/s);
+  if (sentenceMatch && sentenceMatch[1]) {
+    const sentence = sentenceMatch[1].trim();
+    if (sentence.length >= 10 && sentence.length <= 220) {
+      return sentence;
+    }
+  }
+
+  return firstLine.length <= 160 ? firstLine : firstLine.slice(0, 157).trim() + '...';
+}
+
 export function mapVulns(
   matches: ApiVulnMatch[] | null,
   components: ApiComponent[],
@@ -747,7 +769,7 @@ export function mapVulns(
   return rows.map((m, i) => {
     const comp = byId.get(m.component_id);
     const desc = m.description || '';
-    const cleanName = desc ? (desc.split(/[.\n]/)[0].trim() || m.vulnerability_id) : m.vulnerability_id;
+    const cleanName = extractVulnName(desc, m.vulnerability_id);
     const now = new Date();
     const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const hash = Math.abs((m.vulnerability_id + project).split('').reduce((acc, char) => ((acc << 5) - acc + char.charCodeAt(0)) | 0, 0));
@@ -762,13 +784,13 @@ export function mapVulns(
       cvss: m.cvss_score || 0,
       epss: 0,
       severity: titleSeverity(m.severity),
-      status: 'Open',
-      fixVersion: m.fixed_version,
+      status: (m.status as any) || 'Open',
+      fixVersion: m.fixed_version && m.fixed_version !== '*' ? m.fixed_version : '',
       age: 'Just now',
       description: desc || 'Vulnerability detected during software component composition analysis.',
       cwe: 'CWE-20',
       publishedDate: formattedDate,
-      vexStatus: 'affected',
+      vexStatus: (m.vex_status as any) || 'affected',
       vectorString: m.cvss_vector || 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
       exploitAvailable: false,
       affectedVersions: comp?.version || '',
@@ -782,7 +804,42 @@ export function mapVulns(
       lastDetected: `${formattedDate} 10:00 AM`,
       sbomVersion: 'sbom-1.4.2',
       scanVersion: scanId ? `scan-${scanId.substring(0, 8)}` : 'scan-3.7.1',
-      statusChanges: 'Open',
+      statusChanges: (m.status as any) || 'Open',
     };
   });
 }
+
+export interface VulnerabilityTriageRecord {
+  cve: string;
+  project: string;
+  application: string;
+  status: string;
+  vex_status: string;
+  ticket_id?: string;
+  owner?: string;
+  justification?: string;
+  updated_at?: string;
+}
+
+export function listVulnerabilityTriage(params?: { signal?: AbortSignal }): Promise<VulnerabilityTriageRecord[]> {
+  return request<VulnerabilityTriageRecord[]>('/api/v1/vulnerabilities/triage', { signal: params?.signal });
+}
+
+export function updateVulnerabilityStatus(
+  cveId: string,
+  params: {
+    status: string;
+    vexStatus?: string;
+    project?: string;
+    application?: string;
+    ticketId?: string;
+    owner?: string;
+    justification?: string;
+  },
+): Promise<{ cve: string; status: string; vex_status?: string; project?: string }> {
+  return request(`/api/v1/vulnerabilities/${encodeURIComponent(cveId)}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify(params),
+  });
+}
+

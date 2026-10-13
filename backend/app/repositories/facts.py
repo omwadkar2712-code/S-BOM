@@ -97,19 +97,34 @@ def persist_snapshot_facts(db, snap: dict[str, Any], components: list[dict[str, 
                WHERE id = ?""",
             (_depth(raw), children.get(comp["id"]) or [], *flags, comp["id"]),
         )
-    _persist_findings(db, sbom_id, kept, snap.get("raw_metadata") or {})
+    _persist_findings(
+        db,
+        sbom_id,
+        kept,
+        snap.get("raw_metadata") or {},
+        str(snap.get("organization_id") or "default"),
+        str(snap.get("project_id") or ""),
+    )
 
 
 def overlay_snapshot_facts(db, snap: dict[str, Any]) -> None:
     """Fill match and compliance dictionaries from findings and NTIA columns."""
+    org_id = str(snap.get("organization_id") or "default").strip() or "default"
+    project_name = str(snap.get("project_id") or "").strip()
     findings = db.execute(
         """SELECT f.sbom_component_id, v.vulnerability_key, v.reference_urls, f.source, f.severity,
-                  f.cvss_score, f.cvss_vector, f.description, f.fixed_version
+                  f.cvss_score, f.cvss_vector, f.description, f.fixed_version,
+                  COALESCE(t.status, f.status, 'Open') AS status,
+                  COALESCE(t.vex_status, f.vex_status, 'affected') AS vex_status
            FROM findings f
            JOIN vulnerabilities v ON v.id = f.vulnerability_id
+           LEFT JOIN vulnerability_triage t
+             ON UPPER(t.vulnerability_key) = UPPER(v.vulnerability_key)
+            AND t.organization_id = ?
+            AND (t.project_name = ? OR t.project_name = '')
            WHERE f.sbom_id = ?
            ORDER BY v.vulnerability_key""",
-        (snap["id"],),
+        (org_id, project_name, snap["id"]),
     ).fetchall()
     matches = []
     attached: dict[str, list[dict[str, Any]]] = {}
@@ -125,6 +140,8 @@ def overlay_snapshot_facts(db, snap: dict[str, Any]) -> None:
             "cvss_vector": row["cvss_vector"] or "",
             "description": row["description"] or "",
             "fixed_version": row["fixed_version"] or "",
+            "status": row["status"] or "Open",
+            "vex_status": row["vex_status"] or "affected",
         }
         if urls:
             record["references"] = urls
@@ -136,6 +153,8 @@ def overlay_snapshot_facts(db, snap: dict[str, Any]) -> None:
                 "cvss": score,
                 "fixed_version": record["fixed_version"],
                 "source": record["source"],
+                "status": record["status"],
+                "vex_status": record["vex_status"],
             }
         )
     metadata = dict(snap.get("raw_metadata") or {})
@@ -165,7 +184,14 @@ def overlay_snapshot_facts(db, snap: dict[str, Any]) -> None:
             comp["raw"] = raw
 
 
-def _persist_findings(db, sbom_id: str, kept: set[str], metadata: dict) -> None:
+def _persist_findings(
+    db,
+    sbom_id: str,
+    kept: set[str],
+    metadata: dict,
+    org_id: str = "default",
+    project_name: str = "",
+) -> None:
     seen: set[tuple[str, str]] = set()
     for match in metadata.get("vulnerability_matches") or []:
         if not isinstance(match, dict):
@@ -176,12 +202,24 @@ def _persist_findings(db, sbom_id: str, kept: set[str], metadata: dict) -> None:
             continue
         seen.add((component_id, key))
         vulnerability_id = _upsert_vulnerability(db, key, match)
+        triage_row = db.execute(
+            """SELECT status, vex_status FROM vulnerability_triage
+               WHERE organization_id = ? AND UPPER(vulnerability_key) = ?
+                 AND (project_name = ? OR project_name = '')
+               ORDER BY CASE WHEN project_name <> '' THEN 0 ELSE 1 END LIMIT 1""",
+            (org_id, key, project_name),
+        ).fetchone()
+        status_val = (triage_row["status"] if triage_row else "") or match.get("status") or "Open"
+        vex_val = (triage_row["vex_status"] if triage_row else "") or match.get("vex_status") or "affected"
         db.execute(
             """INSERT INTO findings (
                  id, sbom_id, sbom_component_id, vulnerability_id, source, severity,
-                 cvss_score, cvss_vector, description, fixed_version)
-               VALUES (?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT (sbom_component_id, vulnerability_id) DO NOTHING""",
+                 cvss_score, cvss_vector, description, fixed_version, status, vex_status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT (sbom_component_id, vulnerability_id) DO UPDATE SET
+                 status = EXCLUDED.status,
+                 vex_status = EXCLUDED.vex_status,
+                 updated_at = CURRENT_TIMESTAMP""",
             (
                 str(uuid.uuid4()),
                 sbom_id,
@@ -193,6 +231,8 @@ def _persist_findings(db, sbom_id: str, kept: set[str], metadata: dict) -> None:
                 str(match.get("cvss_vector") or "")[:200],
                 str(match.get("description") or "")[:8000],
                 str(match.get("fixed_version") or "")[:100],
+                status_val,
+                vex_val,
             ),
         )
 

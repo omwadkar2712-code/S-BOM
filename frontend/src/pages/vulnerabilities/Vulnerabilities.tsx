@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useAppState } from '../../context/AppStateContext';
 import { Vulnerability, Severity, VexStatus } from '../../types';
+import { extractVulnName } from '../../api/client';
 
 export const Vulnerabilities: React.FC = () => {
   const navigate = useNavigate();
@@ -550,7 +551,7 @@ export const Vulnerabilities: React.FC = () => {
                 </tr>
               ) : (
                 filtered.map((v) => {
-                  const vulnName = v.name || v.description?.split(/[.\n]/)[0]?.trim() || v.cwe || v.cve;
+                  const vulnName = v.name || extractVulnName(v.description, v.cwe || v.cve);
                   const appName = v.application || v.project || 'Service';
 
                   return (
@@ -638,7 +639,7 @@ export const Vulnerabilities: React.FC = () => {
 
                       {/* Fixed Version */}
                       <td className="py-3 px-3.5 whitespace-nowrap font-mono text-gray-700 dark:text-gray-300">
-                        {v.fixVersion || '—'}
+                        {v.fixVersion && v.fixVersion !== '*' ? v.fixVersion : '—'}
                       </td>
 
                       {/* Actions (3 dots icon redirects to screenshot 2 page) */}

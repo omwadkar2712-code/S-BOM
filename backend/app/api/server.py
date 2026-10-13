@@ -449,6 +449,100 @@ def build(cfg: Config | None = None) -> FastAPI:
             return err
         return _envelope((snap.get("raw_metadata") or {}).get("vulnerability_matches"), rid(request))
 
+    @app.get("/api/v1/vulnerabilities/triage")
+    def list_vuln_triage(request: Request):
+        org = _org(request)
+        with db.lock:
+            rows = db.execute(
+                """SELECT vulnerability_key, project_name, application_name, status, vex_status, ticket_id, owner, justification, updated_at
+                   FROM vulnerability_triage
+                   WHERE organization_id = ?
+                   ORDER BY updated_at DESC""",
+                (org,),
+            ).fetchall()
+        data = [
+            {
+                "cve": row["vulnerability_key"],
+                "project": row["project_name"],
+                "application": row["application_name"],
+                "status": row["status"],
+                "vex_status": row["vex_status"],
+                "ticket_id": row["ticket_id"],
+                "owner": row["owner"],
+                "justification": row["justification"],
+                "updated_at": iso(row["updated_at"]) if row["updated_at"] else "",
+            }
+            for row in rows
+        ]
+        return _envelope(data, rid(request))
+
+    @app.patch("/api/v1/vulnerabilities/{cve_id}/status")
+    async def update_vuln_status(cve_id: str, request: Request):
+        org = _org(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        status = str(body.get("status") or "").strip()
+        if not status:
+            return _error("INVALID_INPUT", "status is required", rid(request), 400)
+        vex_status = str(body.get("vex_status") or body.get("vexStatus") or "").strip()
+        project_name = str(body.get("project") or body.get("project_name") or "").strip()
+        app_name = str(body.get("application") or body.get("application_name") or "").strip()
+        ticket_id = str(body.get("ticket_id") or body.get("ticketId") or "").strip()
+        owner = str(body.get("owner") or "").strip()
+        justification = str(body.get("justification") or "").strip()
+        clean_cve = cve_id.strip().upper()
+        now = utcnow()
+
+        with db.lock:
+            db.execute(
+                """INSERT INTO vulnerability_triage (
+                     id, organization_id, vulnerability_key, project_name, application_name,
+                     status, vex_status, ticket_id, owner, justification, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT (organization_id, vulnerability_key, project_name, application_name)
+                   DO UPDATE SET
+                     status = EXCLUDED.status,
+                     vex_status = CASE WHEN EXCLUDED.vex_status <> '' THEN EXCLUDED.vex_status ELSE vulnerability_triage.vex_status END,
+                     ticket_id = CASE WHEN EXCLUDED.ticket_id <> '' THEN EXCLUDED.ticket_id ELSE vulnerability_triage.ticket_id END,
+                     owner = CASE WHEN EXCLUDED.owner <> '' THEN EXCLUDED.owner ELSE vulnerability_triage.owner END,
+                     justification = CASE WHEN EXCLUDED.justification <> '' THEN EXCLUDED.justification ELSE vulnerability_triage.justification END,
+                     updated_at = EXCLUDED.updated_at""",
+                (
+                    str(uuid.uuid4()), org, clean_cve, project_name, app_name,
+                    status, vex_status or "affected", ticket_id, owner, justification, now,
+                ),
+            )
+
+            params = [status]
+            vex_clause = ""
+            if vex_status:
+                vex_clause = ", vex_status = ?"
+                params.append(vex_status)
+            params.extend([now, clean_cve, org])
+
+            proj_clause = ""
+            if project_name:
+                proj_clause = " AND s.project_id = ?"
+                params.append(project_name)
+
+            db.execute(
+                f"""UPDATE findings
+                   SET status = ? {vex_clause}, updated_at = ?
+                   WHERE vulnerability_id IN (SELECT id FROM vulnerabilities WHERE UPPER(vulnerability_key) = ?)
+                     AND sbom_id IN (SELECT s.id FROM sboms s WHERE s.organization_id = ? {proj_clause})""",
+                tuple(params),
+            )
+
+        return _envelope({
+            "cve": clean_cve,
+            "status": status,
+            "vex_status": vex_status,
+            "project": project_name,
+        }, rid(request))
+
+
     @app.get("/api/v1/scans/{scan_id}/export")
     def scan_export(scan_id: str, request: Request, format: str = "cyclonedx-json"):
         scan = _owned(scans, scan_id, _org(request))

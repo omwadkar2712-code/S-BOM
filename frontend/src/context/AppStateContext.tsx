@@ -9,6 +9,7 @@ import {
   ScanJob,
   TimelineEvent,
   UserAccount,
+  VexStatus,
 } from '../types';
 import {
   initialProjects,
@@ -153,7 +154,11 @@ interface AppStateContextType {
   addComponent: (newComp: Partial<SBOMComponent>) => Promise<void>;
   addComponents: (items: Partial<SBOMComponent>[]) => Promise<void>;
   updateTicketStatus: (id: string, status: RemediationTicket['status']) => void;
-  updateVulnerabilityStatus: (idOrCve: string, status: Vulnerability['status']) => void;
+  updateVulnerabilityStatus: (
+    idOrCve: string,
+    status: Vulnerability['status'],
+    extra?: { project?: string; vexStatus?: VexStatus }
+  ) => Promise<void>;
   togglePolicy: (id: string) => void;
   
   toasts: ToastMessage[];
@@ -167,7 +172,22 @@ const AppStateContext = createContext<AppStateContextType | undefined>(undefined
 
 export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [projects, setProjects] = useState<Project[]>(initialProjects);
-  const [vulnerabilities, setVulnerabilities] = useState<Vulnerability[]>(initialVulnerabilities);
+  const [vulnerabilities, setVulnerabilities] = useState<Vulnerability[]>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('vuln_triage_overrides') || '{}');
+      return initialVulnerabilities.map((v) => {
+        const override = stored[v.cve.toUpperCase()];
+        if (!override) return v;
+        return {
+          ...v,
+          status: override.status || v.status,
+          vexStatus: override.vexStatus || v.vexStatus,
+        };
+      });
+    } catch {
+      return initialVulnerabilities;
+    }
+  });
   const [components, setComponents] = useState<SBOMComponent[]>(initialComponents);
   const [tickets, setTickets] = useState<RemediationTicket[]>(initialTickets);
   const [policies, setPolicies] = useState<PolicyRule[]>(initialPolicies);
@@ -324,6 +344,40 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const saved = inventory.map(api.mapInventoryComponent);
           const ids = new Set(saved.map((component) => component.id));
           setComponents((prev) => [...saved, ...prev.filter((component) => !ids.has(component.id))]);
+        }
+        if (!cancelled) {
+          try {
+            const triage = await api.listVulnerabilityTriage();
+            if (triage?.length) {
+              const map = new Map(triage.map((t) => [t.cve.toUpperCase(), t]));
+              setVulnerabilities((prev) =>
+                prev.map((v) => {
+                  const item = map.get(v.cve.toUpperCase());
+                  if (!item) return v;
+                  return {
+                    ...v,
+                    status: (item.status as any) || v.status,
+                    vexStatus: (item.vex_status as any) || v.vexStatus,
+                  };
+                })
+              );
+            }
+          } catch {
+            try {
+              const stored = JSON.parse(localStorage.getItem('vuln_triage_overrides') || '{}');
+              setVulnerabilities((prev) =>
+                prev.map((v) => {
+                  const override = stored[v.cve.toUpperCase()];
+                  if (!override) return v;
+                  return {
+                    ...v,
+                    status: override.status || v.status,
+                    vexStatus: override.vexStatus || v.vexStatus,
+                  };
+                })
+              );
+            } catch {}
+          }
         }
       } catch {
         if (!cancelled) {
@@ -814,15 +868,54 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
-  const updateVulnerabilityStatus = (idOrCve: string, status: Vulnerability['status']) => {
-    setVulnerabilities(prev =>
-      prev.map(v => (v.id === idOrCve || v.cve === idOrCve ? { ...v, status } : v))
+  const updateVulnerabilityStatus = async (
+    idOrCve: string,
+    status: Vulnerability['status'],
+    extra?: { project?: string; vexStatus?: VexStatus }
+  ) => {
+    const target = vulnerabilities.find(
+      (v) => v.id === idOrCve || v.cve.toUpperCase() === idOrCve.toUpperCase()
     );
-    addToast({
-      type: 'info',
-      title: 'Vulnerability Updated',
-      message: `Status updated to "${status}".`,
-    });
+    const cve = target?.cve || idOrCve;
+    const project = extra?.project || target?.project || '';
+    const application = target?.application || '';
+    const vexStatus = extra?.vexStatus || target?.vexStatus;
+
+    setVulnerabilities((prev) =>
+      prev.map((v) =>
+        v.id === idOrCve || v.cve.toUpperCase() === cve.toUpperCase()
+          ? { ...v, status, ...(vexStatus ? { vexStatus } : {}) }
+          : v
+      )
+    );
+
+    try {
+      const stored = JSON.parse(localStorage.getItem('vuln_triage_overrides') || '{}');
+      stored[cve.toUpperCase()] = { status, vexStatus, project, application };
+      localStorage.setItem('vuln_triage_overrides', JSON.stringify(stored));
+    } catch {
+      // ignore
+    }
+
+    try {
+      await api.updateVulnerabilityStatus(cve, {
+        status,
+        vexStatus,
+        project,
+        application,
+      });
+      addToast({
+        type: 'success',
+        title: 'Status Saved to Database',
+        message: `${cve} status permanently saved as "${status}".`,
+      });
+    } catch {
+      addToast({
+        type: 'info',
+        title: 'Vulnerability Updated',
+        message: `Status updated to "${status}".`,
+      });
+    }
   };
 
   const togglePolicy = (id: string) => {

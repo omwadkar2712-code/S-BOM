@@ -17,11 +17,12 @@ import {
 import { useAppState } from '../../context/AppStateContext';
 import { Vulnerability, Severity, VexStatus } from '../../types';
 import { extractVulnName } from '../../api/client';
+import { VulnerabilityActionMenu } from './VulnerabilityActionMenu';
 
 export const Vulnerabilities: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { vulnerabilities, projects, components, addToast } = useAppState();
+  const { vulnerabilities, projects, components, addToast, updateVulnerabilityStatus } = useAppState();
 
   // Project Filter state - initialize from URL query param if present
   const [projectFilter, setProjectFilter] = useState<string>(searchParams.get('project') || 'all');
@@ -200,11 +201,13 @@ export const Vulnerabilities: React.FC = () => {
 
   const renderStatusBadge = (status: string) => {
     switch (status) {
+      case 'Closed':
+      case 'Resolved':
       case 'Fixed':
         return (
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-900/50">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            Fixed
+            {status}
           </span>
         );
       case 'Accepted':
@@ -454,9 +457,10 @@ export const Vulnerabilities: React.FC = () => {
               >
                 <option value="All">All Statuses</option>
                 <option value="Open">Open</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Closed">Closed</option>
                 <option value="Fixed">Fixed</option>
                 <option value="Accepted">Accepted</option>
-                <option value="In Progress">In Progress</option>
               </select>
             </div>
 
@@ -642,23 +646,25 @@ export const Vulnerabilities: React.FC = () => {
                         {v.fixVersion && v.fixVersion !== '*' ? v.fixVersion : '—'}
                       </td>
 
-                      {/* Actions (3 dots icon redirects to screenshot 2 page) */}
+                      {/* Actions (3 dots dropdown with View Details and Update Status) */}
                       <td
                         className="py-3 px-3.5 whitespace-nowrap text-center"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/vulnerabilities/${encodeURIComponent(v.cve)}`, {
-                            state: { vulnerability: v },
-                          });
-                        }}
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <button
-                          type="button"
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
-                          title="View vulnerability details"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
+                        <VulnerabilityActionMenu
+                          vulnerability={v}
+                          onViewDetails={(vuln) => {
+                            navigate(`/vulnerabilities/${encodeURIComponent(vuln.cve)}`, {
+                              state: { vulnerability: vuln },
+                            });
+                          }}
+                          onUpdateStatus={async (vuln, newStatus) => {
+                            await updateVulnerabilityStatus(vuln.cve, newStatus, {
+                              project: vuln.project,
+                              vexStatus: vuln.vexStatus,
+                            });
+                          }}
+                        />
                       </td>
                     </tr>
                   );

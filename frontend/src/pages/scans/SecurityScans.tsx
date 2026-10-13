@@ -45,6 +45,7 @@ import { classifyBulkCsv } from './bulkRows';
 import { PipelineGrid, ScanResultDetails } from './ScanResultDetails';
 import { displayStatus, formatDuration, formatEventTime, isOpenStatus, stageLabel } from './scanProgress';
 import { ScanActionMenu } from './ScanActionMenu';
+import { TablePagination } from '../../components/common/TablePagination';
 
 export const SecurityScans: React.FC = () => {
   const { tab } = useParams<{ tab?: string }>();
@@ -88,10 +89,26 @@ export const SecurityScans: React.FC = () => {
     return matchSearch && matchStatus && matchType;
   });
 
+  // Security Scans Table Pagination State
+  const [scanPage, setScanPage] = useState<number>(1);
+  const [scanPageSize, setScanPageSize] = useState<number>(15);
+
+  useEffect(() => {
+    setScanPage(1);
+  }, [scanSearch, scanStatusFilter, scanTypeFilter]);
+
+  const totalScans = filteredScans.length;
+  const totalScanPages = Math.max(1, Math.ceil(totalScans / scanPageSize));
+  const safeScanPage = Math.min(Math.max(1, scanPage), totalScanPages);
+  const scanStartIndex = (safeScanPage - 1) * scanPageSize;
+  const scanEndIndex = Math.min(scanStartIndex + scanPageSize, totalScans);
+  const paginatedScans = filteredScans.slice(scanStartIndex, scanEndIndex);
+
   const handleResetScanFilters = () => {
     setScanSearch('');
     setScanStatusFilter('All');
     setScanTypeFilter('All');
+    setScanPage(1);
   };
 
   // =========================================================================
@@ -798,7 +815,7 @@ export const SecurityScans: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {filteredScans.length > 0 ? (
-                    filteredScans.map((s) => (
+                    paginatedScans.map((s) => (
                       <tr key={s.id} className="hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-colors">
                         {/* PROJECT NAME */}
                         <td className="py-3 pl-4 pr-3 whitespace-nowrap">
@@ -916,6 +933,20 @@ export const SecurityScans: React.FC = () => {
                 </tbody>
               </table>
             </div>
+
+            {/* Systematic Pagination Controls (15, 20, 25, 50, 100) */}
+            <TablePagination
+              currentPage={safeScanPage}
+              totalItems={totalScans}
+              pageSize={scanPageSize}
+              pageSizeOptions={[15, 20, 25, 50, 100]}
+              onPageChange={(page) => setScanPage(page)}
+              onPageSizeChange={(size) => {
+                setScanPageSize(size);
+                setScanPage(1);
+              }}
+              itemLabel="scans"
+            />
           </div>
         </div>
       )}

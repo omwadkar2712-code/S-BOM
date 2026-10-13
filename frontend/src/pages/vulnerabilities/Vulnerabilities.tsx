@@ -17,6 +17,7 @@ import {
 import { useAppState } from '../../context/AppStateContext';
 import { Vulnerability, Severity, VexStatus } from '../../types';
 import { extractVulnName } from '../../api/client';
+import { TablePagination } from '../../components/common/TablePagination';
 import { VulnerabilityActionMenu } from './VulnerabilityActionMenu';
 
 export const Vulnerabilities: React.FC = () => {
@@ -107,6 +108,23 @@ export const Vulnerabilities: React.FC = () => {
       return matchesSearch && matchesSeverity && matchesStatus && matchesVex;
     });
   }, [projectScopedVulns, searchQuery, selectedSeverity, statusFilter, vexFilter]);
+
+  // Systematic Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(15);
+
+  // Reset to page 1 whenever filters or search query change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedSeverity, statusFilter, vexFilter, projectFilter]);
+
+  // Pagination calculations
+  const totalItems = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalItems);
+  const paginatedVulnerabilities = filtered.slice(startIndex, endIndex);
 
   // CSV Export
   const handleExportCsv = () => {
@@ -440,7 +458,7 @@ export const Vulnerabilities: React.FC = () => {
 
             {/* Showing Count */}
             <span className="text-xs text-gray-500 dark:text-gray-400 pl-1 shrink-0">
-              Showing <strong className="text-gray-900 dark:text-white">{filtered.length}</strong> CVEs
+              Showing <strong className="text-gray-900 dark:text-white">{totalItems === 0 ? 0 : `${startIndex + 1}–${endIndex}`}</strong> of <strong className="text-gray-900 dark:text-white">{totalItems}</strong> CVEs
             </span>
           </div>
         </div>
@@ -554,7 +572,7 @@ export const Vulnerabilities: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filtered.map((v) => {
+                paginatedVulnerabilities.map((v) => {
                   const vulnName = v.name || extractVulnName(v.description, v.cwe || v.cve);
                   const appName = v.application || v.project || 'Service';
 
@@ -672,6 +690,24 @@ export const Vulnerabilities: React.FC = () => {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Systematic Pagination Controls (15, 20, 25, 50, 100) */}
+        <div className="px-4 pb-4">
+          <TablePagination
+            currentPage={safeCurrentPage}
+            totalItems={totalItems}
+            pageSize={pageSize}
+            pageSizeOptions={[15, 20, 25, 50, 100]}
+            onPageChange={(page) => {
+              setCurrentPage(page);
+            }}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setCurrentPage(1);
+            }}
+            itemLabel="vulnerabilities"
+          />
         </div>
       </div>
     </div>

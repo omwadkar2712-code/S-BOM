@@ -9,7 +9,15 @@ const frontend = path.join(root, 'frontend');
 
 console.log('=== 1. Installing Frontend Dependencies ===');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-spawnSync(npm, ['install'], { cwd: frontend, stdio: 'inherit' });
+const feRes = spawnSync(npm, ['install'], {
+  cwd: frontend,
+  stdio: 'inherit',
+  shell: process.platform === 'win32',
+});
+if (feRes.status !== 0) {
+  console.error('\n[ERROR] Frontend installation failed.');
+  process.exit(feRes.status ?? 1);
+}
 
 console.log('\n=== 2. Setting up Backend Python Virtual Environment ===');
 const venvDir = path.join(backend, '.venv');
@@ -20,23 +28,47 @@ const venvPip = process.platform === 'win32'
   ? path.join(venvDir, 'Scripts', 'pip.exe')
   : path.join(venvDir, 'bin', 'pip');
 
-// Find system python/py to create venv if it doesn't exist
+// Find system python/py/uv to create venv if it doesn't exist
 if (!existsSync(venvPython)) {
   console.log('Creating virtual environment in backend/.venv...');
-  const pyCmd = process.platform === 'win32' ? 'py' : 'python3';
-  const venvRes = spawnSync(pyCmd, ['-m', 'venv', '.venv'], { cwd: backend, stdio: 'inherit' });
-  if (venvRes.status !== 0) {
-    // try fallback to 'python'
-    spawnSync('python', ['-m', 'venv', '.venv'], { cwd: backend, stdio: 'inherit' });
+  const pyCandidates = process.platform === 'win32' ? ['python', 'py', 'python3', 'uv'] : ['python3', 'python', 'uv'];
+  let created = false;
+  for (const candidate of pyCandidates) {
+    try {
+      const args = candidate === 'uv' ? ['venv', '.venv'] : ['-m', 'venv', '.venv'];
+      const res = spawnSync(candidate, args, { cwd: backend, stdio: 'inherit', shell: process.platform === 'win32' });
+      if (res.status === 0 && existsSync(venvPython)) {
+        created = true;
+        break;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  if (!created && !existsSync(venvPython)) {
+    console.error('\n[ERROR] Could not create virtual environment. Please ensure Python is installed.');
+    process.exit(1);
   }
 }
 
 if (existsSync(venvPip)) {
   console.log('Installing backend dependencies from requirements.txt...');
-  spawnSync(venvPip, ['install', '-r', 'requirements.txt'], { cwd: backend, stdio: 'inherit' });
+  const beRes = spawnSync(venvPip, ['install', '-r', 'requirements.txt'], { cwd: backend, stdio: 'inherit' });
+  if (beRes.status !== 0) {
+    console.error('\n[ERROR] Backend dependency installation failed.');
+    process.exit(beRes.status ?? 1);
+  }
 } else {
   console.log('[WARN] Could not find venv pip, attempting global python pip...');
-  spawnSync('py', ['-m', 'pip', 'install', '-r', 'backend/requirements.txt'], { cwd: root, stdio: 'inherit' });
+  const res = spawnSync('python', ['-m', 'pip', 'install', '-r', path.join(backend, 'requirements.txt')], {
+    cwd: root,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (res.status !== 0) {
+    console.error('\n[ERROR] Backend dependency installation failed.');
+    process.exit(res.status ?? 1);
+  }
 }
 
 console.log('\n[OK] Setup complete! All dependencies installed successfully.');

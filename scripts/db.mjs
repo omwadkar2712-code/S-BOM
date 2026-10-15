@@ -15,10 +15,16 @@ const action = process.argv[2];
 const scriptName = action === 'import' ? 'import_db.py' : 'export_db.py';
 const scriptPath = path.join(root, 'scripts', scriptName);
 
+const env = { ...process.env };
+env.DATABASE_URL = env.DATABASE_URL || 'postgresql://sbom:123456789@127.0.0.1:5432/S-BOM';
+env.PGPASSWORD = env.PGPASSWORD || '123456789';
+env.PGDATABASE = env.PGDATABASE || 'S-BOM';
+env.PGUSER = env.PGUSER || 'sbom';
+
 const result = spawnSync(python, [scriptPath], {
   cwd: root,
   stdio: 'inherit',
-  env: process.env,
+  env,
 });
 
 process.exit(result.status ?? 0);

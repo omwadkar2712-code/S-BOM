@@ -16,7 +16,7 @@ const env = { ...process.env };
 if (!env.CREDENTIAL_KEK) {
   env.CREDENTIAL_KEK = randomBytes(32).toString('base64');
 }
-env.DATABASE_URL = env.DATABASE_URL || 'postgresql://sbom:sbom@127.0.0.1:5432/sbom';
+env.DATABASE_URL = env.DATABASE_URL || 'postgresql://sbom:123456789@127.0.0.1:5432/S-BOM';
 env.OBJECT_STORAGE_URL = env.OBJECT_STORAGE_URL || 'local://./data/objects';
 env.API_ADDR = env.API_ADDR || '127.0.0.1:8080';
 env.API_ALLOW_ORIGINS = env.API_ALLOW_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173';

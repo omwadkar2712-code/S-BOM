@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useAppState } from '../../context/AppStateContext';
 import { Bell, ShieldAlert, CheckCircle2, AlertTriangle, FileText, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -6,11 +6,36 @@ import { useNavigate } from 'react-router-dom';
 export const NotificationPanel: React.FC = () => {
   const { notificationPanelOpen, setNotificationPanelOpen, timelineEvents } = useAppState();
   const navigate = useNavigate();
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!notificationPanelOpen) return;
+
+    const handlePointerDown = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setNotificationPanelOpen(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNotificationPanelOpen(false);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [notificationPanelOpen, setNotificationPanelOpen]);
 
   if (!notificationPanelOpen) return null;
 
   return (
-    <div className="absolute right-0 top-12 z-50 w-96 bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl overflow-hidden animate-fadeIn">
+    <div
+      ref={panelRef}
+      className="absolute right-0 top-12 z-50 w-96 bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl overflow-hidden animate-fadeIn"
+    >
       {/* Panel Header */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
         <div className="flex items-center gap-2">

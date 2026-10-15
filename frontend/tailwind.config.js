@@ -20,6 +20,10 @@ export default {
           800: '#1e40af',
           900: '#1e3a8a',
         },
+        gray: {
+          750: '#252f40',
+          850: '#141d2f',
+        },
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],

@@ -1,6 +1,6 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,13 +13,34 @@ const venvPython = process.platform === 'win32'
 const python = existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
 
 const env = { ...process.env };
+
+// Load backend/.env if present so custom settings take effect
+const envFile = path.join(backend, '.env');
+if (existsSync(envFile)) {
+  try {
+    const lines = readFileSync(envFile, 'utf8').split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx > 0) {
+        const key = trimmed.slice(0, idx).trim();
+        const val = trimmed.slice(idx + 1).trim();
+        if (env[key] === undefined && val) {
+          env[key] = val;
+        }
+      }
+    }
+  } catch {}
+}
+
 if (!env.CREDENTIAL_KEK) {
   env.CREDENTIAL_KEK = randomBytes(32).toString('base64');
 }
 env.DATABASE_URL = env.DATABASE_URL || 'postgresql://sbom:123456789@127.0.0.1:5432/S-BOM';
 env.OBJECT_STORAGE_URL = env.OBJECT_STORAGE_URL || 'local://./data/objects';
-env.API_ADDR = env.API_ADDR || '127.0.0.1:8080';
-env.API_ALLOW_ORIGINS = env.API_ALLOW_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173';
+env.API_ADDR = env.API_ADDR || '0.0.0.0:8080';
+env.API_ALLOW_ORIGINS = env.API_ALLOW_ORIGINS || '*';
 env.CREDENTIAL_STORE = env.CREDENTIAL_STORE || 'env';
 env.VULN_PROVIDER = env.VULN_PROVIDER || 'mitre';
 env.PYTHONUNBUFFERED = '1';
@@ -226,8 +247,8 @@ if (pip.status !== 0) {
 
 const py = existsSync(venvPython) ? venvPython : python;
 
-console.log(`[dev:all] API    http://127.0.0.1:${apiPort()}`);
-console.log(`[dev:all] UI     http://127.0.0.1:${uiPort}`);
+console.log(`[dev:all] API    http://127.0.0.1:${apiPort()} (listening on ${env.API_ADDR})`);
+console.log(`[dev:all] UI     http://127.0.0.1:${uiPort} (LAN: http://10.50.30.167:${uiPort})`);
 console.log(`[dev:all] DB     ${env.DATABASE_URL}`);
 
 reclaimStaleDevProcesses();

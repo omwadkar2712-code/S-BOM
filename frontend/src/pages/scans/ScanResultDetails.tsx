@@ -3,10 +3,6 @@ import {
   AlertTriangle,
   Ban,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   Download,
   RotateCcw,
   X,
@@ -351,31 +347,6 @@ const SingleResults: React.FC<{
   components: PreviewComponent[];
   vulns: Vulnerability[];
 }> = ({ job, loading, components, vulns }) => {
-  const [compPage, setCompPage] = useState(1);
-  const [compPageSize, setCompPageSize] = useState(8);
-  const [vulnPage, setVulnPage] = useState(1);
-  const [vulnPageSize, setVulnPageSize] = useState(8);
-
-  useEffect(() => {
-    setCompPage(1);
-  }, [components.length]);
-
-  useEffect(() => {
-    setVulnPage(1);
-  }, [vulns.length]);
-
-  const compTotalPages = Math.max(1, Math.ceil(components.length / compPageSize));
-  const safeCompPage = Math.min(Math.max(1, compPage), compTotalPages);
-  const compStart = components.length === 0 ? 0 : (safeCompPage - 1) * compPageSize + 1;
-  const compEnd = Math.min(safeCompPage * compPageSize, components.length);
-  const paginatedComponents = components.slice((safeCompPage - 1) * compPageSize, safeCompPage * compPageSize);
-
-  const vulnTotalPages = Math.max(1, Math.ceil(vulns.length / vulnPageSize));
-  const safeVulnPage = Math.min(Math.max(1, vulnPage), vulnTotalPages);
-  const vulnStart = vulns.length === 0 ? 0 : (safeVulnPage - 1) * vulnPageSize + 1;
-  const vulnEnd = Math.min(safeVulnPage * vulnPageSize, vulns.length);
-  const paginatedVulns = vulns.slice((safeVulnPage - 1) * vulnPageSize, safeVulnPage * vulnPageSize);
-
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -387,209 +358,102 @@ const SingleResults: React.FC<{
         <Stat label="Low" value={job.lows || 0} tone="text-sky-500 dark:text-sky-400" />
       </div>
       {job.status === 'completed' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {/* COMPONENTS CARD WITH PAGINATION */}
-          <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col justify-between bg-white dark:bg-[#111827]">
-            <div>
-              <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">
-                    Components
-                  </p>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-                    {components.length}
-                  </span>
-                </div>
-                {components.length > 0 && (
-                  <span className="text-[10px] text-gray-400 font-mono">
-                    Page {safeCompPage} of {compTotalPages}
-                  </span>
-                )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+          {/* COMPONENTS CARD: Scrollable with dynamic height (no empty space) */}
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111827] overflow-hidden flex flex-col shadow-2xs">
+            <div className="px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/50 dark:bg-gray-800/30">
+              <div className="flex items-center gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                  Components
+                </p>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200/60 dark:border-blue-900/40">
+                  {components.length}
+                </span>
               </div>
-              {loading ? (
-                <p className="px-3 py-4 text-xs text-gray-500">Loading snapshot…</p>
-              ) : components.length === 0 ? (
-                <p className="px-3 py-4 text-xs text-gray-500">No components were recorded for this scan.</p>
-              ) : (
-                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {paginatedComponents.map((component) => (
-                    <li key={component.id} className="px-3 py-2 flex items-center justify-between gap-2 text-xs hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
-                      <span className="font-semibold text-gray-900 dark:text-white truncate" title={component.name}>{component.name}</span>
-                      <span className="text-gray-500 font-mono shrink-0">{component.version} · {component.ecosystem}{component.direct ? ' · direct' : ''}</span>
-                    </li>
-                  ))}
-                </ul>
+              {components.length > 5 && (
+                <span className="text-[10px] text-gray-400 font-medium">
+                  Scroll for all
+                </span>
               )}
             </div>
 
-            {components.length > 0 && (
-              <div className="px-3 py-2 bg-gray-50/70 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                    {compStart}–{compEnd} of {components.length}
-                  </span>
-                  <select
-                    value={compPageSize}
-                    onChange={(e) => {
-                      setCompPageSize(Number(e.target.value));
-                      setCompPage(1);
-                    }}
-                    className="text-[10px] font-medium px-1.5 py-0.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-gray-700 dark:text-gray-300 cursor-pointer focus:outline-none"
+            {loading ? (
+              <p className="px-3.5 py-4 text-xs text-gray-500">Loading snapshot…</p>
+            ) : components.length === 0 ? (
+              <p className="px-3.5 py-4 text-xs text-gray-500">No components were recorded for this scan.</p>
+            ) : (
+              <ul className="divide-y divide-gray-100 dark:divide-gray-800/80 max-h-[320px] overflow-y-auto overscroll-contain">
+                {components.map((component) => (
+                  <li
+                    key={component.id}
+                    className="px-3.5 py-2 flex items-center justify-between gap-2 text-xs hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-colors"
                   >
-                    <option value={5}>5/page</option>
-                    <option value={8}>8/page</option>
-                    <option value={15}>15/page</option>
-                    <option value={25}>25/page</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setCompPage(1)}
-                    disabled={safeCompPage === 1}
-                    className="p-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="First page"
-                  >
-                    <ChevronsLeft className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCompPage((p) => Math.max(1, p - 1))}
-                    disabled={safeCompPage === 1}
-                    className="p-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="Previous page"
-                  >
-                    <ChevronLeft className="w-3 h-3" />
-                  </button>
-                  <span className="px-1 text-[11px] font-bold text-gray-800 dark:text-gray-200 font-mono">
-                    {safeCompPage}/{compTotalPages}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setCompPage((p) => Math.min(compTotalPages, p + 1))}
-                    disabled={safeCompPage === compTotalPages}
-                    className="p-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="Next page"
-                  >
-                    <ChevronRight className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCompPage(compTotalPages)}
-                    disabled={safeCompPage === compTotalPages}
-                    className="p-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="Last page"
-                  >
-                    <ChevronsRight className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
+                    <span className="font-semibold text-gray-900 dark:text-white truncate" title={component.name}>
+                      {component.name}
+                    </span>
+                    <span className="text-gray-500 dark:text-gray-400 font-mono text-[11px] shrink-0">
+                      {component.version} · {component.ecosystem}{component.direct ? ' · direct' : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
 
-          {/* VULNERABILITIES CARD WITH PAGINATION */}
-          <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col justify-between bg-white dark:bg-[#111827]">
-            <div>
-              <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">
-                    Vulnerabilities
-                  </p>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-                    {vulns.length}
-                  </span>
-                </div>
-                {vulns.length > 0 && (
-                  <span className="text-[10px] text-gray-400 font-mono">
-                    Page {safeVulnPage} of {vulnTotalPages}
-                  </span>
-                )}
+          {/* VULNERABILITIES CARD: Scrollable with dynamic height (no empty space) */}
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111827] overflow-hidden flex flex-col shadow-2xs">
+            <div className="px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/50 dark:bg-gray-800/30">
+              <div className="flex items-center gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                  Vulnerabilities
+                </p>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-200/60 dark:border-rose-900/40">
+                  {vulns.length}
+                </span>
               </div>
-              {loading ? (
-                <p className="px-3 py-4 text-xs text-gray-500">Loading findings…</p>
-              ) : vulns.length === 0 ? (
-                <p className="px-3 py-4 text-xs text-gray-500">No vulnerability matches on this snapshot.</p>
-              ) : (
-                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {paginatedVulns.map((vuln) => (
-                    <li key={vuln.id} className="px-3 py-2 text-xs hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono font-semibold text-gray-900 dark:text-white">{vuln.cve}</span>
-                        <span className={vuln.severity === 'Critical' ? 'text-red-600 dark:text-red-400 font-bold' : vuln.severity === 'High' ? 'text-orange-500 dark:text-orange-400 font-bold' : vuln.severity === 'Medium' ? 'text-amber-500 dark:text-amber-400 font-semibold' : 'text-sky-500 dark:text-sky-400 font-medium'}>
-                          {vuln.severity}
-                        </span>
-                      </div>
-                      <p className="text-gray-500 truncate">{vuln.package} {vuln.version}{vuln.fixVersion ? ` · fix ${vuln.fixVersion}` : ''}</p>
-                    </li>
-                  ))}
-                </ul>
+              {vulns.length > 5 && (
+                <span className="text-[10px] text-gray-400 font-medium">
+                  Scroll for all
+                </span>
               )}
             </div>
 
-            {vulns.length > 0 && (
-              <div className="px-3 py-2 bg-gray-50/70 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                    {vulnStart}–{vulnEnd} of {vulns.length}
-                  </span>
-                  <select
-                    value={vulnPageSize}
-                    onChange={(e) => {
-                      setVulnPageSize(Number(e.target.value));
-                      setVulnPage(1);
-                    }}
-                    className="text-[10px] font-medium px-1.5 py-0.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-gray-700 dark:text-gray-300 cursor-pointer focus:outline-none"
+            {loading ? (
+              <p className="px-3.5 py-4 text-xs text-gray-500">Loading findings…</p>
+            ) : vulns.length === 0 ? (
+              <p className="px-3.5 py-4 text-xs text-gray-500">No vulnerability matches on this snapshot.</p>
+            ) : (
+              <ul className="divide-y divide-gray-100 dark:divide-gray-800/80 max-h-[320px] overflow-y-auto overscroll-contain">
+                {vulns.map((vuln) => (
+                  <li
+                    key={vuln.id}
+                    className="px-3.5 py-2 text-xs hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-colors"
                   >
-                    <option value={5}>5/page</option>
-                    <option value={8}>8/page</option>
-                    <option value={15}>15/page</option>
-                    <option value={25}>25/page</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setVulnPage(1)}
-                    disabled={safeVulnPage === 1}
-                    className="p-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="First page"
-                  >
-                    <ChevronsLeft className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVulnPage((p) => Math.max(1, p - 1))}
-                    disabled={safeVulnPage === 1}
-                    className="p-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="Previous page"
-                  >
-                    <ChevronLeft className="w-3 h-3" />
-                  </button>
-                  <span className="px-1 text-[11px] font-bold text-gray-800 dark:text-gray-200 font-mono">
-                    {safeVulnPage}/{vulnTotalPages}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setVulnPage((p) => Math.min(vulnTotalPages, p + 1))}
-                    disabled={safeVulnPage === vulnTotalPages}
-                    className="p-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="Next page"
-                  >
-                    <ChevronRight className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVulnPage(vulnTotalPages)}
-                    disabled={safeVulnPage === vulnTotalPages}
-                    className="p-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="Last page"
-                  >
-                    <ChevronsRight className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono font-semibold text-gray-900 dark:text-white">
+                        {vuln.cve}
+                      </span>
+                      <span
+                        className={`text-[11px] font-bold ${
+                          vuln.severity === 'Critical'
+                            ? 'text-red-600 dark:text-red-400'
+                            : vuln.severity === 'High'
+                            ? 'text-orange-500 dark:text-orange-400'
+                            : vuln.severity === 'Medium'
+                            ? 'text-amber-500 dark:text-amber-400'
+                            : 'text-sky-500 dark:text-sky-400'
+                        }`}
+                      >
+                        {vuln.severity}
+                      </span>
+                    </div>
+                    <p className="text-gray-500 dark:text-gray-400 text-[11px] truncate mt-0.5">
+                      {vuln.package} {vuln.version}
+                      {vuln.fixVersion ? ` · fix ${vuln.fixVersion}` : ''}
+                    </p>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </div>

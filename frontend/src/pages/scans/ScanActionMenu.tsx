@@ -141,7 +141,7 @@ export const ScanActionMenu: React.FC<ScanActionMenuProps> = ({
         className={`p-1.5 rounded-lg border transition-all cursor-pointer shadow-2xs flex items-center justify-center ${
           isOpen
             ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 ring-2 ring-blue-500/20'
-            : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-750 hover:border-gray-300 dark:hover:border-gray-600'
+            : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
         }`}
       >
         <MoreVertical className="w-4 h-4" />

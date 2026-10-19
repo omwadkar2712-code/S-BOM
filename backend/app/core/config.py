@@ -83,9 +83,9 @@ class Config:
     def host(self) -> str:
         addr = self.api_addr
         if addr.startswith(":"):
-            return "127.0.0.1"
+            return "0.0.0.0"
         host, _, _port = addr.rpartition(":")
-        return host or "127.0.0.1"
+        return host or "0.0.0.0"
 
     @property
     def port(self) -> int:
@@ -98,8 +98,8 @@ class Config:
 
 def load() -> Config:
     cfg = Config(
-        api_addr=_env("API_ADDR", "127.0.0.1:8080"),
-        api_allow_origins=_csv(_env("API_ALLOW_ORIGINS", "")),
+        api_addr=_env("API_ADDR", "0.0.0.0:8080"),
+        api_allow_origins=_csv(_env("API_ALLOW_ORIGINS", "*")),
         database_url=_env("DATABASE_URL", "postgresql://sbom:123456789@127.0.0.1:5432/S-BOM"),
         object_storage_url=_env("OBJECT_STORAGE_URL", "local://./data/objects"),
         credential_store=_env("CREDENTIAL_STORE", "env"),

@@ -42,8 +42,8 @@ if (!env.CREDENTIAL_KEK) {
 }
 env.DATABASE_URL = env.DATABASE_URL || 'postgresql://sbom:123456789@127.0.0.1:5432/S-BOM';
 env.OBJECT_STORAGE_URL = env.OBJECT_STORAGE_URL || 'local://./data/objects';
-env.API_ADDR = env.API_ADDR || '127.0.0.1:8080';
-env.API_ALLOW_ORIGINS = env.API_ALLOW_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173';
+env.API_ADDR = env.API_ADDR || '0.0.0.0:8080';
+env.API_ALLOW_ORIGINS = env.API_ALLOW_ORIGINS || '*';
 env.CREDENTIAL_STORE = env.CREDENTIAL_STORE || 'env';
 env.VULN_PROVIDER = env.VULN_PROVIDER || 'mitre';
 env.PYTHONUNBUFFERED = '1';
@@ -250,8 +250,8 @@ if (pip.status !== 0) {
 
 const py = existsSync(venvPython) ? venvPython : python;
 
-console.log(`[dev:all] API    http://127.0.0.1:${apiPort()}`);
-console.log(`[dev:all] UI     http://127.0.0.1:${uiPort}`);
+console.log(`[dev:all] API    http://127.0.0.1:${apiPort()} (listening on ${env.API_ADDR})`);
+console.log(`[dev:all] UI     http://127.0.0.1:${uiPort} (LAN: http://10.50.30.167:${uiPort})`);
 console.log(`[dev:all] DB     ${env.DATABASE_URL}`);
 
 reclaimStaleDevProcesses();

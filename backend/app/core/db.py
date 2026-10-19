@@ -218,9 +218,69 @@ def finish(db: Database) -> None:
 
 
 def migrate(db: Database) -> None:
-    for path in sorted(_MIGRATIONS.glob("*.up.sql")):
-        db.script(path.read_text(encoding="utf-8"))
-    finish(db)
+    with db.lock:
+        db.raw.execute("SELECT pg_advisory_lock(83726194)")
+    try:
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+        applied_rows = db.execute("SELECT version FROM schema_migrations").fetchall()
+        applied = {row["version"] for row in applied_rows}
+
+        if not applied:
+            has_scans = (
+                db.execute(
+                    "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'scans'"
+                ).fetchone()
+                is not None
+            )
+            has_triage = (
+                db.execute(
+                    "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'vulnerability_triage'"
+                ).fetchone()
+                is not None
+            )
+
+            if has_scans:
+                for v in [
+                    "001_initial.up.sql",
+                    "002_security_scans_move.up.sql",
+                    "004_software_inventory.up.sql",
+                    "005_relational_facts.up.sql",
+                    "006_ten_tables.up.sql",
+                ]:
+                    db.execute(
+                        "INSERT INTO schema_migrations (version) VALUES (?) ON CONFLICT DO NOTHING",
+                        (v,),
+                    )
+                    applied.add(v)
+
+            if has_triage:
+                db.execute(
+                    "INSERT INTO schema_migrations (version) VALUES (?) ON CONFLICT DO NOTHING",
+                    ("007_vulnerability_triage.up.sql",),
+                )
+                applied.add("007_vulnerability_triage.up.sql")
+
+        for path in sorted(_MIGRATIONS.glob("*.up.sql")):
+            if path.name in applied:
+                continue
+            log.info("Applying database migration: %s", path.name)
+            db.script(path.read_text(encoding="utf-8"))
+            db.execute(
+                "INSERT INTO schema_migrations (version) VALUES (?) ON CONFLICT DO NOTHING",
+                (path.name,),
+            )
+            applied.add(path.name)
+
+        finish(db)
+    finally:
+        with db.lock:
+            db.raw.execute("SELECT pg_advisory_unlock(83726194)")
+
 
 
 def _statements(sql: str) -> list[str]:

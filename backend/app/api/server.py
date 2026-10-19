@@ -496,6 +496,22 @@ def build(cfg: Config | None = None) -> FastAPI:
         now = utcnow()
 
         with db.lock:
+            existing = db.execute(
+                """SELECT status FROM vulnerability_triage
+                   WHERE organization_id = ? AND vulnerability_key = ?
+                     AND (? = '' OR project_name = ?)
+                   LIMIT 1""",
+                (org, clean_cve, project_name, project_name),
+            ).fetchone()
+            current_status = str(existing["status"] if existing else "Open").strip()
+            if current_status.lower() == "open" and status.lower() in ("closed", "fixed") and not justification:
+                return _error(
+                    "INVALID_STATUS_TRANSITION",
+                    "Direct transition from Open to Closed is not allowed without validation justification. Move to In Progress or provide remediation justification.",
+                    rid(request),
+                    400,
+                )
+
             db.execute(
                 """INSERT INTO vulnerability_triage (
                      id, organization_id, vulnerability_key, project_name, application_name,

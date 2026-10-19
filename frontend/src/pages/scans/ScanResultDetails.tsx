@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   Ban,
   CheckCircle2,
   Download,
+  ExternalLink,
   RotateCcw,
   X,
 } from 'lucide-react';
@@ -165,7 +167,7 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
           api.scanVulnerabilities(job.id).catch(() => []),
         ]);
         if (cancelled) return;
-        const mappedVulns = api.mapVulns(matches, comps || [], job.targetProject);
+        const mappedVulns = api.mapVulns(matches, comps || [], job.targetProject, job.appService, job.id);
         setComponentTotal((comps || []).length);
         setVulnTotal(mappedVulns.length);
         setSeverityTotals({
@@ -202,7 +204,7 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [job.id, job.status, job.isBulkAggregate, job.targetProject]);
+  }, [job.id, job.status, job.isBulkAggregate, job.targetProject, job.appService]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fadeIn">
@@ -264,6 +266,7 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
             loading={loadingResults}
             components={components}
             vulns={vulns}
+            onClose={onClose}
           />
         )}
 
@@ -346,12 +349,23 @@ const SingleResults: React.FC<{
   loading: boolean;
   components: PreviewComponent[];
   vulns: Vulnerability[];
-}> = ({ job, loading, components, vulns }) => {
+  onClose: () => void;
+}> = ({ job, loading, components, vulns, onClose }) => {
+  const navigate = useNavigate();
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <Stat label="Components" value={job.componentsFound || 0} />
-        <Stat label="Findings" value={job.cvesFound || 0} />
+        <div
+          onClick={() => {
+            onClose();
+            navigate(`/vulnerabilities?project=${encodeURIComponent(job.targetProject)}`);
+          }}
+          className="cursor-pointer transition-all hover:ring-2 hover:ring-blue-500/20 rounded-lg"
+          title="Click to view all findings in Vulnerability Management"
+        >
+          <Stat label="Findings" value={job.cvesFound || 0} tone="text-blue-600 dark:text-blue-400" />
+        </div>
         <Stat label="Critical" value={job.criticals || 0} tone="text-red-600 dark:text-red-400" />
         <Stat label="High" value={job.highs || 0} tone="text-orange-500 dark:text-orange-400" />
         <Stat label="Medium" value={job.mediums || 0} tone="text-amber-500 dark:text-amber-400" />
@@ -411,11 +425,24 @@ const SingleResults: React.FC<{
                   {vulns.length}
                 </span>
               </div>
-              {vulns.length > 5 && (
-                <span className="text-[10px] text-gray-400 font-medium">
-                  Scroll for all
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    navigate(`/vulnerabilities?project=${encodeURIComponent(job.targetProject)}`);
+                  }}
+                  className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <span>View all</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </button>
+                {vulns.length > 5 && (
+                  <span className="text-[10px] text-gray-400 font-medium">
+                    Scroll for all
+                  </span>
+                )}
+              </div>
             </div>
 
             {loading ? (
@@ -427,11 +454,19 @@ const SingleResults: React.FC<{
                 {vulns.map((vuln) => (
                   <li
                     key={vuln.id}
-                    className="px-3.5 py-2 text-xs hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-colors"
+                    onClick={() => {
+                      onClose();
+                      navigate(`/vulnerabilities/${encodeURIComponent(vuln.cve)}`, {
+                        state: { vulnerability: vuln },
+                      });
+                    }}
+                    className="px-3.5 py-2 text-xs hover:bg-blue-50/70 dark:hover:bg-blue-950/40 transition-colors cursor-pointer group"
+                    title="Click to view vulnerability details"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono font-semibold text-gray-900 dark:text-white">
+                      <span className="font-mono font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors flex items-center gap-1.5">
                         {vuln.cve}
+                        <ExternalLink className="w-3 h-3 text-gray-400 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </span>
                       <span
                         className={`text-[11px] font-bold ${

@@ -38,34 +38,34 @@ function severityRank(severity?: string): number {
   }
 }
 
-function packageKey(component: { name: string; version: string; ecosystem?: string }): string {
-  return `${(component.ecosystem || '').toLowerCase()}|${component.name.toLowerCase()}|${component.version}`;
+function packageKey(component: { name: string; version: string; ecosystem?: string; project?: string }): string {
+  return `${(component.project || '').toLowerCase()}|${(component.ecosystem || '').toLowerCase()}|${component.name.toLowerCase()}|${component.version}`;
 }
 
-function mergeByPackage<T extends { name: string; version: string; ecosystem?: string }>(current: T[], incoming: T[]): T[] {
-  const seen = new Set(current.map(packageKey));
-  const added = incoming.filter((component) => {
-    const key = packageKey(component);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  return added.length ? [...current, ...added] : current;
+function mergeByPackage<T extends { name: string; version: string; ecosystem?: string; project?: string }>(current: T[], incoming: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const c of current) {
+    map.set(packageKey(c), c);
+  }
+  for (const c of incoming) {
+    map.set(packageKey(c), c);
+  }
+  return Array.from(map.values());
 }
 
 function vulnKey(vuln: Vulnerability): string {
-  return `${vuln.cve}|${vuln.package.toLowerCase()}|${vuln.version}`;
+  return `${(vuln.project || '').toLowerCase()}|${(vuln.application || '').toLowerCase()}|${vuln.cve.toUpperCase()}|${vuln.package.toLowerCase()}|${vuln.version}`;
 }
 
 function mergeVulns(current: Vulnerability[], incoming: Vulnerability[]): Vulnerability[] {
-  const seen = new Set(current.map(vulnKey));
-  const added = incoming.filter((vuln) => {
-    const key = vulnKey(vuln);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  return added.length ? [...current, ...added] : current;
+  const map = new Map<string, Vulnerability>();
+  for (const v of current) {
+    map.set(vulnKey(v), v);
+  }
+  for (const v of incoming) {
+    map.set(vulnKey(v), v);
+  }
+  return Array.from(map.values());
 }
 
 function riskFromRank(rank: number): SBOMComponent['risk'] {
@@ -157,7 +157,7 @@ interface AppStateContextType {
   updateVulnerabilityStatus: (
     idOrCve: string,
     status: Vulnerability['status'],
-    extra?: { project?: string; vexStatus?: VexStatus }
+    extra?: { project?: string; vexStatus?: VexStatus; justification?: string; ticketId?: string; owner?: string }
   ) => Promise<void>;
   togglePolicy: (id: string) => void;
   
@@ -871,7 +871,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateVulnerabilityStatus = async (
     idOrCve: string,
     status: Vulnerability['status'],
-    extra?: { project?: string; vexStatus?: VexStatus }
+    extra?: { project?: string; vexStatus?: VexStatus; justification?: string; ticketId?: string; owner?: string }
   ) => {
     const target = vulnerabilities.find(
       (v) => v.id === idOrCve || v.cve.toUpperCase() === idOrCve.toUpperCase()
@@ -880,18 +880,27 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const project = extra?.project || target?.project || '';
     const application = target?.application || '';
     const vexStatus = extra?.vexStatus || target?.vexStatus;
+    const justification = extra?.justification || '';
+    const ticketId = extra?.ticketId || target?.ticketId || '';
+    const owner = extra?.owner || target?.owner || '';
 
     setVulnerabilities((prev) =>
       prev.map((v) =>
         v.id === idOrCve || v.cve.toUpperCase() === cve.toUpperCase()
-          ? { ...v, status, ...(vexStatus ? { vexStatus } : {}) }
+          ? {
+              ...v,
+              status,
+              ...(vexStatus ? { vexStatus } : {}),
+              ...(ticketId ? { ticketId } : {}),
+              ...(owner ? { owner } : {}),
+            }
           : v
       )
     );
 
     try {
       const stored = JSON.parse(localStorage.getItem('vuln_triage_overrides') || '{}');
-      stored[cve.toUpperCase()] = { status, vexStatus, project, application };
+      stored[cve.toUpperCase()] = { status, vexStatus, project, application, justification, ticketId, owner };
       localStorage.setItem('vuln_triage_overrides', JSON.stringify(stored));
     } catch {
       // ignore
@@ -903,6 +912,9 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         vexStatus,
         project,
         application,
+        justification,
+        ticketId,
+        owner,
       });
       addToast({
         type: 'success',
@@ -959,58 +971,121 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (format === 'spdx') {
         mimeType = 'application/json';
+        const docNamespace = `https://spdx.org/spdxdocs/${cleanProj}-${exportId || 'export'}-${Date.now()}`;
+        const rootSpdxId = 'SPDXRef-Package-Root';
+        const pkgList = exportComponents.map((c, i) => {
+          const cleanName = (c.name || 'component').replace(/[^a-zA-Z0-9.-]/g, '-');
+          const spdxId = `SPDXRef-Package-${cleanName}-${i + 1}`;
+          return { c, spdxId };
+        });
+
         content = JSON.stringify({
           spdxVersion: 'SPDX-2.3',
           dataLicense: 'CC0-1.0',
           SPDXID: 'SPDXRef-DOCUMENT',
           name: `SPDX-${projName}`,
-          documentNamespace: `https://spdx.org/spdxdocs/${cleanProj}-${exportId || 'export'}-${Date.now()}`,
+          documentNamespace: docNamespace,
           creationInfo: {
             created: new Date().toISOString(),
             creators: [
-              'Tool: S-BOM Generator',
+              'Tool: S-BOM Generator-1.5.0',
               (targetScan as any)?.requestedBy ? `Person: ${(targetScan as any).requestedBy}` : 'Organization: Security Operations',
             ],
           },
-          packages: exportComponents.map(c => ({
-            SPDXID: `SPDXRef-Package-${c.id || c.name}`,
-            name: c.name,
-            versionInfo: c.version,
-            licenseConcluded: c.license || 'NOASSERTION',
-            externalRefs: c.purl
-              ? [
-                  {
-                    referenceCategory: 'PACKAGE-MANAGER',
-                    referenceType: 'purl',
-                    referenceLocator: c.purl,
-                  },
-                ]
-              : [],
-          })),
+          packages: [
+            {
+              SPDXID: rootSpdxId,
+              name: projName,
+              versionInfo: targetScan?.releaseTag || '1.0.0',
+              downloadLocation: 'NOASSERTION',
+              filesAnalyzed: false,
+              licenseConcluded: 'NOASSERTION',
+              licenseDeclared: 'NOASSERTION',
+              copyrightText: 'NOASSERTION',
+              supplier: 'Organization: S-BOM',
+              description: `Root package for ${projName}`,
+            },
+            ...pkgList.map(({ c, spdxId }) => ({
+              SPDXID: spdxId,
+              name: c.name,
+              versionInfo: c.version,
+              downloadLocation: 'NOASSERTION',
+              filesAnalyzed: false,
+              licenseConcluded: c.license || 'NOASSERTION',
+              licenseDeclared: c.license || 'NOASSERTION',
+              copyrightText: 'NOASSERTION',
+              externalRefs: c.purl
+                ? [
+                    {
+                      referenceCategory: 'PACKAGE-MANAGER',
+                      referenceType: 'purl',
+                      referenceLocator: c.purl,
+                    },
+                  ]
+                : [],
+            })),
+          ],
+          relationships: [
+            {
+              spdxElementId: 'SPDXRef-DOCUMENT',
+              relationshipType: 'DESCRIBES',
+              relatedSpdxElement: rootSpdxId,
+            },
+            ...pkgList.map(({ spdxId }) => ({
+              spdxElementId: rootSpdxId,
+              relationshipType: 'DEPENDS_ON',
+              relatedSpdxElement: spdxId,
+            })),
+          ],
         }, null, 2);
       } else if (format === 'cyclonedx') {
         mimeType = 'application/json';
+        const rootRef = `pkg:generic/${cleanProj}@${targetScan?.releaseTag || '1.0.0'}`;
+        const cdxComponents = exportComponents.map((c) => ({
+          'bom-ref': c.purl || `pkg:${(c.ecosystem || 'generic').toLowerCase()}/${c.name}@${c.version}`,
+          type: 'library',
+          name: c.name,
+          version: c.version,
+          purl: c.purl,
+          licenses: c.license ? [{ license: { id: c.license } }] : [],
+        }));
+
+        const matchingVulns = vulnerabilities.filter(
+          (v) => !v.project || v.project.toLowerCase() === projName.toLowerCase()
+        );
+        const cdxVulns = matchingVulns.map((v) => ({
+          id: v.cve,
+          source: { name: v.source || 'NVD', url: `https://nvd.nist.gov/vuln/detail/${v.cve}` },
+          ratings: [
+            {
+              score: v.cvss || 0,
+              severity: (v.severity || 'info').toLowerCase(),
+              method: 'CVSSv31',
+              vector: v.vectorString || undefined,
+            },
+          ],
+          description: v.description,
+          affects: [{ ref: v.purl || `pkg:${(v.ecosystem || 'generic').toLowerCase()}/${v.package}@${v.version}` }],
+        }));
+
         content = JSON.stringify({
           bomFormat: 'CycloneDX',
           specVersion: '1.5',
+          serialNumber: `urn:uuid:${crypto.randomUUID ? crypto.randomUUID() : 'f81d4fae-7dec-11d0-a765-00a0c91e6bf6'}`,
           version: 1,
           metadata: {
             timestamp: new Date().toISOString(),
+            tools: [{ vendor: 'S-BOM', name: 'SBOM Engine', version: '1.5.0' }],
+            authors: (targetScan as any)?.requestedBy ? [{ name: (targetScan as any).requestedBy }] : [],
             component: {
+              'bom-ref': rootRef,
               type: 'application',
               name: projName,
               version: targetScan?.releaseTag || '1.0.0',
             },
-            tools: [{ vendor: 'S-BOM', name: 'SBOM Engine' }],
-            authors: (targetScan as any)?.requestedBy ? [{ name: (targetScan as any).requestedBy }] : [],
           },
-          components: exportComponents.map(c => ({
-            type: 'library',
-            name: c.name,
-            version: c.version,
-            purl: c.purl,
-            licenses: c.license ? [{ license: { id: c.license } }] : [],
-          })),
+          components: cdxComponents,
+          vulnerabilities: cdxVulns.length > 0 ? cdxVulns : undefined,
         }, null, 2);
       } else if (format === 'csv') {
         mimeType = 'text/csv';

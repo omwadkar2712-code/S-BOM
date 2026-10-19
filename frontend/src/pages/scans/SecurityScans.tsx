@@ -40,7 +40,7 @@ import { useAppState } from '../../context/AppStateContext';
 import type { ScanJob } from '../../types';
 import { ProjectApplicationSelect } from '../../components/common/ProjectApplicationSelect';
 import type { CatalogRecord } from '../../api/client';
-import { filesFromDataTransfer, fileTypesIn, folderLabel, folderTypeLabel, isArchiveName, isManifestRelativePath, selectFolderManifests, SUPPORTED_MANIFEST_HINT, type FolderFile } from './localFolder';
+import { filesFromDataTransfer, fileTypesIn, folderLabel, folderTypeLabel, isArchiveName, isInsideSkippedDir, isManifestRelativePath, selectFolderManifests, SUPPORTED_MANIFEST_HINT, type FolderFile } from './localFolder';
 import { classifyBulkCsv } from './bulkRows';
 import { PipelineGrid, ScanResultDetails } from './ScanResultDetails';
 import { displayStatus, formatDuration, formatEventTime, isOpenStatus, stageLabel } from './scanProgress';
@@ -157,20 +157,25 @@ export const SecurityScans: React.FC = () => {
   };
 
   const useFolderManifests = (items: FolderFile[]) => {
+    const nonSkipped = items.filter((item) => {
+      const rel = item.relativePath.replace(/\\/g, '/');
+      return rel !== '' && !isInsideSkippedDir(rel);
+    });
     const manifests = selectFolderManifests(items);
-    setSelectedFolder(folderTypeLabel(items, manifests));
-    if (manifests.length === 0) {
+    setSelectedFolder(folderTypeLabel(nonSkipped.length > 0 ? nonSkipped : items, manifests));
+    if (items.length === 0) {
       setLocalFile(null);
       setLocalFolder([]);
       addToast({
         type: 'warning',
-        title: 'No manifests found',
-        message: `That folder has no supported dependency manifest. Supported: ${SUPPORTED_MANIFEST_HINT}.`,
+        title: 'Empty folder',
+        message: 'The selected folder contains no files.',
       });
       return;
     }
     setLocalFile(null);
-    setLocalFolder(manifests);
+    // Allow importing all files and folders within the selected folder
+    setLocalFolder(nonSkipped.length > 0 ? nonSkipped : items);
   };
 
   const acceptLocalDrop = async (dt: DataTransfer) => {

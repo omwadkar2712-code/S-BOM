@@ -140,6 +140,8 @@ def parse_manifest(kind: str, path: Path, rel: str) -> dict:
         return parse_r_description(raw, rel)
     if kind in ("HASKELL_CABAL", "HASKELL_CABAL_PROJECT"):
         return parse_cabal(raw, rel)
+    if kind == "JSON_MANIFEST":
+        return parse_json_manifest(raw, rel)
     raise KeyError(kind)
 
 
@@ -1520,6 +1522,192 @@ def parse_cabal(raw: bytes, rel: str) -> dict:
                 source_manifest=rel,
             )
         )
+    return res
+
+
+def parse_json_manifest(raw: bytes, rel: str) -> dict:
+    """Parses CycloneDX JSON, SPDX JSON, or generic JSON dependency manifests."""
+    res = {"components": [], "dependencies": [], "source_manifest": rel}
+    try:
+        data = json.loads(raw.decode("utf-8", "replace"))
+    except Exception:
+        return res
+
+    # 1. CycloneDX JSON
+    if isinstance(data, dict) and (data.get("bomFormat") == "CycloneDX" or (data.get("components") and (data.get("specVersion") or data.get("metadata")))):
+        components_raw = data.get("components") or []
+        for comp in components_raw:
+            if not isinstance(comp, dict):
+                continue
+            name = comp.get("name") or ""
+            if not name:
+                continue
+            version = str(comp.get("version") or "")
+            purl = comp.get("purl") or ""
+            eco = "generic"
+            if "pkg:npm" in purl:
+                eco = "npm"
+            elif "pkg:pypi" in purl or "pkg:pip" in purl:
+                eco = "pypi"
+            elif "pkg:maven" in purl:
+                eco = "maven"
+            elif "pkg:golang" in purl or "pkg:go" in purl:
+                eco = "go"
+            elif "pkg:cargo" in purl:
+                eco = "cargo"
+            elif "pkg:nuget" in purl:
+                eco = "nuget"
+            elif "pkg:composer" in purl:
+                eco = "composer"
+            elif "pkg:gem" in purl:
+                eco = "rubygems"
+            elif comp.get("type") == "library":
+                eco = "npm"
+            
+            license_val = ""
+            licenses = comp.get("licenses")
+            if isinstance(licenses, list) and licenses:
+                first = licenses[0]
+                if isinstance(first, dict):
+                    lic = first.get("license") or first
+                    license_val = str(lic.get("id") or lic.get("name") or "")
+                elif isinstance(first, str):
+                    license_val = first
+
+            hashes = {}
+            for h in comp.get("hashes") or []:
+                if isinstance(h, dict) and h.get("alg") and h.get("content"):
+                    alg = str(h["alg"]).upper().replace("-", "")
+                    if "SHA256" in alg:
+                        hashes["SHA-256"] = h["content"]
+                    elif "SHA1" in alg:
+                        hashes["SHA-1"] = h["content"]
+                    elif "SHA512" in alg:
+                        hashes["SHA-512"] = h["content"]
+
+            c = _comp(
+                name=name,
+                version=version,
+                ecosystem=eco,
+                package_manager=eco,
+                purl=purl or f"pkg:{eco}/{name}@{version}" if version else f"pkg:{eco}/{name}",
+                direct=True,
+                source_manifest=rel,
+                license=license_val,
+                cpe=str(comp.get("cpe") or ""),
+                supplier=str((comp.get("supplier") or {}).get("name") or comp.get("author") or ""),
+                hash=hashes.get("SHA-256", ""),
+                raw={"hashes": hashes, "description": comp.get("description") or ""},
+            )
+            res["components"].append(c)
+        return res
+
+    # 2. SPDX JSON
+    if isinstance(data, dict) and (data.get("spdxVersion") or data.get("SPDXID") or (data.get("packages") and data.get("documentNamespace"))):
+        packages_raw = data.get("packages") or []
+        for pkg in packages_raw:
+            if not isinstance(pkg, dict):
+                continue
+            spdx_id = str(pkg.get("SPDXID") or "")
+            if spdx_id in ("SPDXRef-DOCUMENT", "SPDXRef-Package-Root"):
+                continue
+            name = pkg.get("name") or ""
+            if not name:
+                continue
+            version = str(pkg.get("versionInfo") or "")
+            purl = ""
+            for ref in pkg.get("externalRefs") or []:
+                if isinstance(ref, dict) and str(ref.get("referenceType")).lower() == "purl":
+                    purl = str(ref.get("referenceLocator") or "")
+                    break
+            eco = "generic"
+            if "pkg:npm" in purl:
+                eco = "npm"
+            elif "pkg:pypi" in purl:
+                eco = "pypi"
+            elif "pkg:maven" in purl:
+                eco = "maven"
+            elif "pkg:golang" in purl or "pkg:go" in purl:
+                eco = "go"
+            elif "pkg:cargo" in purl:
+                eco = "cargo"
+            elif "pkg:nuget" in purl:
+                eco = "nuget"
+            elif "pkg:composer" in purl:
+                eco = "composer"
+            elif "pkg:gem" in purl:
+                eco = "rubygems"
+            else:
+                eco = "npm"
+
+            lic = str(pkg.get("licenseConcluded") or pkg.get("licenseDeclared") or "")
+            if lic in ("NOASSERTION", "NONE"):
+                lic = ""
+
+            c = _comp(
+                name=name,
+                version=version if version != "NOASSERTION" else "",
+                ecosystem=eco,
+                package_manager=eco,
+                purl=purl or (f"pkg:{eco}/{name}@{version}" if version and version != "NOASSERTION" else f"pkg:{eco}/{name}"),
+                direct=True,
+                source_manifest=rel,
+                license=lic,
+                supplier=str(pkg.get("supplier") or "").replace("Organization: ", "").replace("Person: ", ""),
+            )
+            res["components"].append(c)
+        return res
+
+    # 3. Standard package.json layout
+    if isinstance(data, dict) and ("dependencies" in data or "devDependencies" in data or "peerDependencies" in data):
+        return parse_package_json(raw, rel)
+
+    # 4. Standard lockfile layout
+    if isinstance(data, dict) and ("packages" in data or "lockfileVersion" in data):
+        return parse_npm_lock(raw, rel)
+
+    # 5. Generic components list or dictionary
+    items = []
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        if isinstance(data.get("components"), list):
+            items = data["components"]
+        elif isinstance(data.get("packages"), list):
+            items = data["packages"]
+        elif isinstance(data.get("dependencies"), dict):
+            for k, v in data["dependencies"].items():
+                items.append({"name": k, "version": str(v) if isinstance(v, (str, int, float)) else ""})
+        elif isinstance(data.get("dependencies"), list):
+            items = data["dependencies"]
+        else:
+            # Check if dict of { "pkg": "version" }
+            for k, v in data.items():
+                if isinstance(v, str):
+                    items.append({"name": k, "version": v})
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("package") or ""
+        if not name:
+            continue
+        version = str(item.get("version") or "")
+        eco = str(item.get("ecosystem") or "npm").lower()
+        purl = item.get("purl") or f"pkg:{eco}/{name}@{version}" if version else f"pkg:{eco}/{name}"
+        res["components"].append(
+            _comp(
+                name=name,
+                version=version,
+                ecosystem=eco,
+                package_manager=eco,
+                purl=purl,
+                direct=True,
+                source_manifest=rel,
+                license=str(item.get("license") or ""),
+            )
+        )
+
     return res
 
 

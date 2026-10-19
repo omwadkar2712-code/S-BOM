@@ -725,10 +725,11 @@ export const Vulnerabilities: React.FC = () => {
                               state: { vulnerability: vuln },
                             });
                           }}
-                          onUpdateStatus={async (vuln, newStatus) => {
+                          onUpdateStatus={async (vuln, newStatus, extra) => {
                             await updateVulnerabilityStatus(vuln.cve, newStatus, {
                               project: vuln.project,
                               vexStatus: vuln.vexStatus,
+                              justification: extra?.justification,
                             });
                           }}
                         />

@@ -22,11 +22,11 @@ const MANIFEST_NAMES = new Set([
   'description', 'cabal.project',
 ]);
 
-const MANIFEST_EXTENSIONS = ['.csproj', '.vbproj', '.fsproj', '.opam', '.cabal'];
+const MANIFEST_EXTENSIONS = ['.csproj', '.vbproj', '.fsproj', '.opam', '.cabal', '.json'];
 
 /** Short hint for toasts and the local-scan drop zone. */
 export const SUPPORTED_MANIFEST_HINT =
-  'package.json, requirements.txt, pom.xml, build.gradle, go.mod, Cargo.toml, *.csproj, composer.json, Gemfile, pubspec.yaml, mix.exs, Package.swift, conanfile.txt, DESCRIPTION, *.opam, *.cabal, or a .zip';
+  'JSON (.json), package.json, requirements.txt, pom.xml, build.gradle, go.mod, Cargo.toml, *.csproj, composer.json, Gemfile, pubspec.yaml, mix.exs, Package.swift, conanfile.txt, DESCRIPTION, *.opam, *.cabal, or a .zip';
 
 export function isManifestRelativePath(rel: string): boolean {
   const base = rel.split('/').filter(Boolean).pop() || '';

@@ -7,7 +7,7 @@ import uuid
 
 import psycopg
 
-TEST_DB = "postgresql://sbom:sbom@127.0.0.1:5432/sbom_test"
+TEST_DB = os.environ.get("TEST_DATABASE_URL", "postgresql://sbom:123456789@127.0.0.1:5432/sbom_test")
 
 os.environ["CREDENTIAL_KEK"] = base64.b64encode(b"0123456789abcdef0123456789abcdef").decode()
 os.environ["DATABASE_URL"] = TEST_DB

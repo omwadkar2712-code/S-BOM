@@ -206,7 +206,7 @@ def is_supported_manifest(name: str) -> bool:
     lower = base.lower()
     if lower in _MANIFEST_LOWER:
         return True
-    return lower.endswith((".csproj", ".vbproj", ".fsproj", ".opam", ".cabal"))
+    return lower.endswith((".csproj", ".vbproj", ".fsproj", ".opam", ".cabal", ".json"))
 
 
 def safe_upload_rel(name: str) -> str:
@@ -231,17 +231,20 @@ def path_skipped(rel: str) -> bool:
 
 
 def pack_folder(files: list[tuple[str, bytes]]) -> tuple[bytes, str]:
-    """files is (relative path, content)."""
+    """files is (relative path, content). Support importing all files and folders."""
     buf = io.BytesIO()
     seen = set()
     packed = []
+    has_manifest = False
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
         for name, content in files:
             rel = safe_upload_rel(name)
-            if path_skipped(rel) or not is_supported_manifest(rel) or rel in seen:
+            if path_skipped(rel) or rel in seen:
                 continue
             if len(content) > 64 * 1024 * 1024:
                 continue
+            if is_supported_manifest(rel):
+                has_manifest = True
             zf.writestr(rel, content)
             seen.add(rel)
             packed.append(rel)

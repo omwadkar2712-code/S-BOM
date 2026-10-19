@@ -88,6 +88,8 @@ def match_file(base: str) -> tuple[str, str, int] | None:
         return ("HASKELL_CABAL", "hackage", 3)
     if lower in GRADLE_FILES:
         return ("JAVA_GRADLE", "maven", 3)
+    if lower.endswith(".json"):
+        return ("JSON_MANIFEST", "generic", 3)
     return None
 
 

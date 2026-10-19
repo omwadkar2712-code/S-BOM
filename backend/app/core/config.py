@@ -3,8 +3,25 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from dataclasses import dataclass
 from urllib.parse import urlparse
+
+_DOTENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+if _DOTENV_PATH.exists():
+    try:
+        for _line in _DOTENV_PATH.read_text(encoding="utf-8").splitlines():
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _k, _, _v = _line.partition("=")
+            _k, _v = _k.strip(), _v.strip()
+            if (_v.startswith('"') and _v.endswith('"')) or (_v.startswith("'") and _v.endswith("'")):
+                _v = _v[1:-1]
+            if _k and _k not in os.environ:
+                os.environ[_k] = _v
+    except Exception:
+        pass
 
 
 def _env(key: str, default: str) -> str:

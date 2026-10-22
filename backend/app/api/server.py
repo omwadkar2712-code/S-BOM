@@ -158,6 +158,13 @@ def build(cfg: Config | None = None) -> FastAPI:
                     if len(content) > cfg.max_upload_bytes:
                         return _error("INVALID_INPUT", "multipart parse failed", rid(request), 400)
                     pairs.append((name, content))
+                if not pairs or all(len(c) == 0 for _, c in pairs):
+                    return _error(
+                        "EMPTY_FILE",
+                        "The selected folder contains only empty files (0 bytes). Empty folders cannot be scanned.",
+                        rid(request),
+                        400,
+                    )
                 try:
                     packed, upload_name = pack_folder(pairs)
                 except ValueError:
@@ -182,6 +189,13 @@ def build(cfg: Config | None = None) -> FastAPI:
                         400,
                     )
                 blob = await file.read()
+                if len(blob) == 0:
+                    return _error(
+                        "EMPTY_FILE",
+                        f"The file '{filename}' is empty (0 bytes). Empty files cannot be scanned.",
+                        rid(request),
+                        400,
+                    )
                 upload_name = filename
             else:
                 return _error("INVALID_INPUT", "file field is required", rid(request), 400)
@@ -679,12 +693,26 @@ def build(cfg: Config | None = None) -> FastAPI:
         if not (lower.endswith(".csv") or lower.endswith(".xlsx")):
             return _error("UNSUPPORTED_FILE", "expected .csv or .xlsx", rid(request), 400)
         blob = await file.read()
+        if len(blob) == 0:
+            return _error(
+                "EMPTY_FILE",
+                f"The spreadsheet file '{file.filename}' is empty (0 bytes). Empty files cannot be scanned.",
+                rid(request),
+                400,
+            )
         if len(blob) > cfg.max_bulk_file_bytes:
             return _error("INVALID_INPUT", "multipart parse failed", rid(request), 400)
         try:
             rows, errors = parse_bulk(file.filename, blob, cfg.max_bulk_file_bytes)
         except Exception as exc:
-            return _error("INVALID_BULK_FILE", str(exc), rid(request), 400)
+            msg = str(exc)
+            code = "EMPTY_FILE" if "empty file" in msg.lower() else "INVALID_BULK_FILE"
+            error_message = (
+                f"The spreadsheet file '{file.filename}' contains no data rows or is empty. Empty files cannot be scanned."
+                if "empty file" in msg.lower()
+                else msg
+            )
+            return _error(code, error_message, rid(request), 400)
         if len(rows) > cfg.max_bulk_rows:
             return _error("TOO_MANY_ROWS", "file exceeds MAX_BULK_ROWS", rid(request), 400)
         try:

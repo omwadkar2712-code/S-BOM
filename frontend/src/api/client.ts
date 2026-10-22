@@ -335,13 +335,20 @@ export function createLocalScan(
 ): Promise<{ scan_id: string; status?: string; stage?: string }> {
   const body = new FormData();
   if (source.folderFiles && source.folderFiles.length > 0) {
-    for (const item of source.folderFiles) {
+    const nonZero = source.folderFiles.filter((item) => item.file.size > 0);
+    if (nonZero.length === 0) {
+      throw new ApiError('EMPTY_FILE', 'The selected folder contains only empty files (0 bytes). Empty folders cannot be scanned.');
+    }
+    for (const item of nonZero) {
       const rel = item.relativePath.replace(/\\/g, '/');
       const base = rel.split('/').pop() || item.file.name;
       body.append('files', item.file, base);
       body.append('paths', rel);
     }
   } else if (source.file) {
+    if (source.file.size === 0) {
+      throw new ApiError('EMPTY_FILE', `The file "${source.file.name}" is empty (0 bytes). Empty files cannot be scanned.`);
+    }
     body.append('file', source.file);
   } else {
     throw new ApiError('INVALID_INPUT', 'Choose a folder, a zip archive, or a manifest file.');
@@ -407,6 +414,9 @@ export interface ApiBulk {
 }
 
 export function createBulkScan(file: File, project: string): Promise<ApiBulk> {
+  if (file.size === 0) {
+    throw new ApiError('EMPTY_FILE', `The spreadsheet file "${file.name}" is empty (0 bytes). Empty files cannot be scanned.`);
+  }
   const body = new FormData();
   body.append('file', file);
   body.append('project_name', project);

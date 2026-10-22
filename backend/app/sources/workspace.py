@@ -271,6 +271,8 @@ def parse_bulk(filename: str, data: bytes, max_bytes: int) -> tuple[list[dict], 
     DUPLICATE_PROJECT and must not be queued. The same project name with a
     different repository or branch is a different project.
     """
+    if len(data) == 0:
+        raise ValueError("empty file: file contains 0 bytes")
     if len(data) > max_bytes:
         raise ValueError("file exceeds size limit")
     lower = filename.lower()
@@ -284,7 +286,7 @@ def parse_bulk(filename: str, data: bytes, max_bytes: int) -> tuple[list[dict], 
     else:
         raise ValueError(f"unsupported bulk file type: {filename}")
     if not rows:
-        raise ValueError("empty file")
+        raise ValueError("empty file: spreadsheet contains no rows")
     header = {str(cell).strip().lower(): i for i, cell in enumerate(rows[0])}
     for required in ("project_name", "application_name", "version", "repository_url"):
         if required not in header:

@@ -11,6 +11,7 @@ import * as XLSX from 'xlsx';
 import { useAppState } from '../../context/AppStateContext';
 import {
   filesFromDataTransfer,
+  isInsideSkippedDir,
   selectFolderManifests,
   type FolderFile,
 } from '../scans/localFolder';
@@ -54,6 +55,7 @@ export const UploadInventoryModal: React.FC<UploadInventoryModalProps> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedFolderFiles, setSelectedFolderFiles] = useState<FolderFile[]>([]);
   const [displayName, setDisplayName] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'files' | 'folder'>('files');
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -123,6 +125,18 @@ export const UploadInventoryModal: React.FC<UploadInventoryModalProps> = ({
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     const file = files[0];
+    if (file.size === 0) {
+      setSelectedFile(null);
+      setSelectedFolderFiles([]);
+      setDisplayName('');
+      addToast({
+        type: 'error',
+        title: 'Empty File',
+        message: `The file "${file.name}" is empty (0 bytes). Empty files cannot be scanned.`,
+      });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     setSelectedFile(file);
     setSelectedFolderFiles([]);
     setDisplayName(`${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
@@ -134,11 +148,28 @@ export const UploadInventoryModal: React.FC<UploadInventoryModalProps> = ({
       relativePath: (file as any).webkitRelativePath || file.name,
     }));
     if (items.length === 0) return;
-    const manifests = selectFolderManifests(items);
-    setSelectedFolderFiles(manifests.length > 0 ? manifests : items);
+    const nonSkipped = items.filter((item) => {
+      const rel = item.relativePath.replace(/\\/g, '/');
+      return rel !== '' && !isInsideSkippedDir(rel);
+    });
+    const finalItems = nonSkipped.length > 0 ? nonSkipped : items;
+    if (finalItems.length === 0 || finalItems.every((item) => item.file.size === 0)) {
+      setSelectedFile(null);
+      setSelectedFolderFiles([]);
+      setDisplayName('');
+      addToast({
+        type: 'error',
+        title: 'Empty Folder',
+        message: 'The selected folder contains no files or only empty files (0 bytes). Empty folders cannot be scanned.',
+      });
+      if (folderInputRef.current) folderInputRef.current.value = '';
+      return;
+    }
+    const manifests = selectFolderManifests(finalItems);
+    setSelectedFolderFiles(finalItems);
     setSelectedFile(null);
-    const rootName = items[0]?.relativePath.split('/')[0] || 'project-folder';
-    setDisplayName(`${rootName} (${items.length} files, ${manifests.length} manifests detected)`);
+    const rootName = finalItems[0]?.relativePath.split('/')[0] || 'project-folder';
+    setDisplayName(`${rootName} (${finalItems.length} files, ${manifests.length} manifests detected)`);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -160,21 +191,56 @@ export const UploadInventoryModal: React.FC<UploadInventoryModalProps> = ({
 
     try {
       const items = await filesFromDataTransfer(e.dataTransfer);
-      if (items.length === 0) return;
-
-      const nested = items.some((item: FolderFile) => item.relativePath.includes('/'));
-      if (!nested && items.length === 1) {
-        setSelectedFile(items[0].file);
-        setSelectedFolderFiles([]);
-        setDisplayName(`${items[0].file.name} (${(items[0].file.size / 1024).toFixed(1)} KB)`);
+      if (items.length === 0) {
+        addToast({
+          type: 'error',
+          title: 'Empty Drop',
+          message: 'No files were dropped or the dropped item was empty. Empty items cannot be scanned.',
+        });
         return;
       }
 
-      const manifests = selectFolderManifests(items);
-      setSelectedFolderFiles(manifests.length > 0 ? manifests : items);
+      const nested = items.some((item: FolderFile) => item.relativePath.includes('/'));
+      if (!nested && items.length === 1) {
+        const file = items[0].file;
+        if (file.size === 0) {
+          setSelectedFile(null);
+          setSelectedFolderFiles([]);
+          setDisplayName('');
+          addToast({
+            type: 'error',
+            title: 'Empty File',
+            message: `The file "${file.name}" is empty (0 bytes). Empty files cannot be scanned.`,
+          });
+          return;
+        }
+        setSelectedFile(file);
+        setSelectedFolderFiles([]);
+        setDisplayName(`${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+        return;
+      }
+
+      const nonSkipped = items.filter((item: FolderFile) => {
+        const rel = item.relativePath.replace(/\\/g, '/');
+        return rel !== '' && !isInsideSkippedDir(rel);
+      });
+      const finalItems = nonSkipped.length > 0 ? nonSkipped : items;
+      if (finalItems.length === 0 || finalItems.every((item) => item.file.size === 0)) {
+        setSelectedFile(null);
+        setSelectedFolderFiles([]);
+        setDisplayName('');
+        addToast({
+          type: 'error',
+          title: 'Empty Folder',
+          message: 'The selected folder contains no files or only empty files (0 bytes). Empty folders cannot be scanned.',
+        });
+        return;
+      }
+      const manifests = selectFolderManifests(finalItems);
+      setSelectedFolderFiles(finalItems);
       setSelectedFile(null);
-      const rootName = items[0]?.relativePath.split('/')[0] || 'project-folder';
-      setDisplayName(`${rootName} (${items.length} files, ${manifests.length} manifests detected)`);
+      const rootName = finalItems[0]?.relativePath.split('/')[0] || 'project-folder';
+      setDisplayName(`${rootName} (${finalItems.length} files, ${manifests.length} manifests detected)`);
     } catch (err) {
       console.error('Failed to parse dropped files', err);
       addToast({
@@ -203,6 +269,24 @@ export const UploadInventoryModal: React.FC<UploadInventoryModalProps> = ({
       return;
     }
 
+    if (selectedFile && selectedFile.size === 0) {
+      addToast({
+        type: 'error',
+        title: 'Empty File',
+        message: `The file "${selectedFile.name}" is empty (0 bytes). Empty files cannot be scanned.`,
+      });
+      return;
+    }
+
+    if (selectedFolderFiles.length > 0 && selectedFolderFiles.every((f) => f.file.size === 0)) {
+      addToast({
+        type: 'error',
+        title: 'Empty Folder',
+        message: 'The selected folder contains only empty files (0 bytes). Empty folders cannot be scanned.',
+      });
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -222,7 +306,17 @@ export const UploadInventoryModal: React.FC<UploadInventoryModalProps> = ({
             const buffer = await selectedFile.arrayBuffer();
             const workbook = XLSX.read(buffer, { type: 'array' });
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+            const rows = sheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' }) : [];
+
+            if (!sheet || rows.length === 0) {
+              setIsSubmitting(false);
+              addToast({
+                type: 'error',
+                title: 'Empty Spreadsheet',
+                message: `The spreadsheet file "${selectedFile.name}" contains no data rows. Empty files cannot be scanned.`,
+              });
+              return;
+            }
 
             const pick = (row: Record<string, unknown>, ...keys: string[]): string => {
               for (const rawKey of Object.keys(row)) {
@@ -431,54 +525,80 @@ export const UploadInventoryModal: React.FC<UploadInventoryModalProps> = ({
           </button>
         </div>
 
+        {/* Tab Bar Header (matches reference design) */}
+        <div className="flex items-center gap-8 border-b border-gray-200 dark:border-gray-800 px-6 pt-3 bg-gray-50/50 dark:bg-gray-900/40">
+          <button
+            type="button"
+            onClick={() => setActiveTab('files')}
+            className={`pb-3 text-sm font-bold transition-all relative cursor-pointer ${
+              activeTab === 'files'
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            Upload Files
+            {activeTab === 'files' && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('folder')}
+            className={`pb-3 text-sm font-bold transition-all relative cursor-pointer ${
+              activeTab === 'folder'
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            Import Folder
+            {activeTab === 'folder' && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400" />
+            )}
+          </button>
+        </div>
+
         {/* Modal Body Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
           {/* Upload Dropzone Area */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between pb-1.5 border-b border-gray-100 dark:border-gray-800">
-              <div className="flex items-center gap-2">
-                <FileCode className="w-4 h-4 text-blue-500" />
-                <h4 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
-                  Document / Manifest Upload
-                </h4>
-              </div>
-              <span className="text-[11px] text-gray-400">
-                Supports Excel (.xlsx, .csv) & manifests
-              </span>
-            </div>
-
             {/* Dashed Dropzone Box */}
             <div
+              onClick={() => {
+                if (activeTab === 'files') {
+                  openFilePicker();
+                } else {
+                  openFolderPicker();
+                }
+              }}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className={`w-full border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-all ${isDragging
+              className={`w-full border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-all cursor-pointer group ${isDragging
                 ? 'border-blue-500 bg-blue-50/60 dark:bg-blue-950/40 ring-4 ring-blue-500/10'
-                : 'border-blue-300 dark:border-gray-700 bg-slate-50/40 dark:bg-gray-850/40 hover:border-blue-400 dark:hover:border-blue-500'
+                : 'border-gray-300 dark:border-gray-700 bg-slate-50/40 dark:bg-gray-850/40 hover:border-blue-500 dark:hover:border-blue-400'
                 }`}
             >
-              <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-500 flex items-center justify-center mx-auto mb-2.5 shadow-2xs border border-blue-100 dark:border-blue-900/50">
-                <Folder className="w-7 h-7" />
+              <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-2.5 shadow-2xs border border-blue-100 dark:border-blue-900/50 group-hover:scale-105 transition-transform">
+                {activeTab === 'files' ? (
+                  <FileCode className="w-6 h-6" />
+                ) : (
+                  <Folder className="w-6 h-6" />
+                )}
               </div>
 
-              <p className="text-sm font-bold text-gray-900 dark:text-white">
-                DROP A FILE
+              <p className="text-sm font-bold text-blue-600 dark:text-blue-400 group-hover:underline">
+                {activeTab === 'files' ? 'Drag & Drop or Browse files.' : 'Drag & Drop or Browse folder.'}
               </p>
 
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xl mx-auto leading-relaxed">
-                One file is enough: Excel (.xlsx, .xls, .csv), package.json, requirements.txt, pyproject.toml, pom.xml, build.gradle, go.mod, Cargo.toml, packages.config, composer.json, or Gemfile.
+                Max size limit 400 MB
               </p>
 
-              <div className="mt-3.5 flex items-center justify-center">
-                <button
-                  type="button"
-                  onClick={openFilePicker}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-sm transition-all hover:shadow flex items-center gap-2"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Choose File</span>
-                </button>
-              </div>
+              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5 max-w-xl mx-auto">
+                {activeTab === 'files'
+                  ? 'Max no of file(s) 25 · Supports Excel (.xlsx, .xls, .csv), package.json, pom.xml, requirements.txt, .zip, etc.'
+                  : 'Imports all files & subfolders within the selected directory'}
+              </p>
 
               <input
                 ref={folderInputRef}
@@ -496,13 +616,13 @@ export const UploadInventoryModal: React.FC<UploadInventoryModalProps> = ({
               />
 
               {displayName && (
-                <div className="mt-4 inline-flex items-center gap-2.5 px-4 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-semibold shadow-xs animate-fadeIn">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <div className="mt-4 inline-flex items-center gap-2.5 px-4 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200 text-xs font-semibold shadow-xs animate-fadeIn">
+                  <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                   <span className="font-mono">{displayName}</span>
                   <button
                     type="button"
                     onClick={handleClearSelection}
-                    className="p-1 rounded hover:bg-emerald-200/50 dark:hover:bg-emerald-900 text-emerald-700 dark:text-emerald-300 transition-colors ml-1"
+                    className="p-1 rounded hover:bg-blue-200/50 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 transition-colors ml-1"
                     title="Remove selected file"
                   >
                     <X className="w-3.5 h-3.5" />

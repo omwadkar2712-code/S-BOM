@@ -239,3 +239,51 @@ def test_cancel_queued_and_running_scan(tmp_path):
     assert client.get(f"/api/v1/scans/{running_id}/status", headers=headers).json()["data"]["status"] == "CANCELLED"
 
 
+def test_local_empty_file_returns_400():
+    app = build()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/scans/local",
+        data={"project_name": "Demo", "application_name": "demo-app", "version": "1.0.0"},
+        files={"file": ("package.json", io.BytesIO(b""), "application/json")},
+        headers={"X-Organization-Id": "default"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "EMPTY_FILE"
+    assert "empty" in resp.json()["error"]["message"].lower()
+
+
+def test_local_empty_folder_returns_400():
+    app = build()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/scans/local",
+        data={
+            "project_name": "Demo",
+            "application_name": "demo-app",
+            "version": "1.0.0",
+            "paths": ["folder/package.json"],
+        },
+        files=[("files", ("package.json", io.BytesIO(b""), "application/json"))],
+        headers={"X-Organization-Id": "default"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "EMPTY_FILE"
+    assert "empty" in resp.json()["error"]["message"].lower()
+
+
+def test_bulk_empty_file_returns_400():
+    app = build()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/scans/bulk",
+        data={"project_name": "Demo"},
+        files={"file": ("bulk.csv", io.BytesIO(b""), "text/csv")},
+        headers={"X-Organization-Id": "default"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "EMPTY_FILE"
+    assert "empty" in resp.json()["error"]["message"].lower()
+
+
+

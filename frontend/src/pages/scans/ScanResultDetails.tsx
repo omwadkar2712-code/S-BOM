@@ -7,9 +7,11 @@ import {
   Download,
   ExternalLink,
   RotateCcw,
+  Shield,
   X,
 } from 'lucide-react';
 import * as api from '../../api/client';
+import { useAppState } from '../../context/AppStateContext';
 import type { BulkScanItemView, ScanJob, Vulnerability } from '../../types';
 import { displayStatus, formatDuration, formatEventTime, pipelineSteps, stageLabel, type StepState } from './scanProgress';
 
@@ -95,6 +97,8 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
   onOpenScan,
   onExport,
 }) => {
+  const navigate = useNavigate();
+  const { addVulnerabilities } = useAppState();
   const [events, setEvents] = useState<ScanJob['events']>(job.events || []);
   const [components, setComponents] = useState<PreviewComponent[]>([]);
   const [vulns, setVulns] = useState<Vulnerability[]>([]);
@@ -184,6 +188,9 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
           direct: component.direct,
         })));
         setVulns(mappedVulns);
+        if (mappedVulns.length > 0) {
+          addVulnerabilities(mappedVulns);
+        }
       } catch {
         if (!cancelled) {
           setComponents([]);
@@ -206,6 +213,19 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
     };
   }, [job.id, job.status, job.isBulkAggregate, job.targetProject, job.appService]);
 
+  const handleOpenFindings = (severity?: string) => {
+    if (vulns.length > 0) {
+      addVulnerabilities(vulns);
+    }
+    onClose();
+    const params = new URLSearchParams();
+    params.set('project', job.targetProject);
+    if (severity) {
+      params.set('severity', severity);
+    }
+    navigate(`/vulnerabilities?${params.toString()}`);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fadeIn">
       <div className="bg-white dark:bg-[#111827] rounded-xl max-w-4xl w-full max-h-[88vh] overflow-y-auto p-6 shadow-2xl border border-gray-200 dark:border-gray-800 space-y-4">
@@ -213,7 +233,7 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-base font-bold text-gray-900 dark:text-white truncate">
-                {job.targetProject}
+                {job.isBulkAggregate ? `Bulk Scan Batch (${job.source || 'Template'})` : job.targetProject}
               </h3>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusClass(job.status)}`}>
                 {displayStatus(job.status)}
@@ -223,7 +243,9 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-1">
-              {job.appService || 'Application'} · {job.releaseTag || 'UNKNOWN'} · <span className="font-mono">{job.id}</span>
+              {job.isBulkAggregate
+                ? `Batch ID: ${job.bulkId || job.id}`
+                : `${job.appService || 'Application'} · ${job.releaseTag || 'UNKNOWN'} · ${job.id}`}
             </p>
           </div>
           <button type="button" onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 cursor-pointer">
@@ -267,6 +289,7 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
             components={components}
             vulns={vulns}
             onClose={onClose}
+            onOpenFindings={handleOpenFindings}
           />
         )}
 
@@ -318,6 +341,15 @@ export const ScanResultDetails: React.FC<ScanResultDetailsProps> = ({
           )}
           {job.status === 'completed' && (
             <>
+              <button
+                type="button"
+                onClick={() => handleOpenFindings()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg cursor-pointer transition-colors shadow-2xs"
+                title={`View all findings for ${job.targetProject} in Vulnerability Management`}
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span>View Findings ({vulnTotal || job.cvesFound || 0})</span>
+              </button>
               <button type="button" onClick={() => onExport('spdx', job.id)} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">
                 <Download className="w-3.5 h-3.5" /> SPDX
               </button>
@@ -350,26 +382,69 @@ const SingleResults: React.FC<{
   components: PreviewComponent[];
   vulns: Vulnerability[];
   onClose: () => void;
-}> = ({ job, loading, components, vulns, onClose }) => {
+  onOpenFindings: (severity?: string) => void;
+}> = ({ job, loading, components, vulns, onClose, onOpenFindings }) => {
   const navigate = useNavigate();
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <Stat label="Components" value={job.componentsFound || 0} />
-        <div
+        <Stat
+          label="Components"
+          value={job.componentsFound || 0}
+          clickable
           onClick={() => {
             onClose();
-            navigate(`/vulnerabilities?project=${encodeURIComponent(job.targetProject)}`);
+            navigate(`/software-inventory?project=${encodeURIComponent(job.targetProject)}`);
           }}
-          className="cursor-pointer transition-all hover:ring-2 hover:ring-blue-500/20 rounded-lg"
-          title="Click to view all findings in Vulnerability Management"
-        >
-          <Stat label="Findings" value={job.cvesFound || 0} tone="text-blue-600 dark:text-blue-400" />
-        </div>
-        <Stat label="Critical" value={job.criticals || 0} tone="text-red-600 dark:text-red-400" />
-        <Stat label="High" value={job.highs || 0} tone="text-orange-500 dark:text-orange-400" />
-        <Stat label="Medium" value={job.mediums || 0} tone="text-amber-500 dark:text-amber-400" />
-        <Stat label="Low" value={job.lows || 0} tone="text-sky-500 dark:text-sky-400" />
+          title={`Click to view components in Software Inventory for ${job.targetProject}`}
+          badge="Inventory →"
+        />
+        <Stat
+          label="Findings"
+          value={job.cvesFound || 0}
+          tone="text-blue-600 dark:text-blue-400 font-extrabold"
+          clickable
+          onClick={() => onOpenFindings()}
+          title={`Click to view all ${job.cvesFound || 0} findings in Vulnerability Management for ${job.targetProject}`}
+          badge="View findings →"
+          activeColor="blue"
+        />
+        <Stat
+          label="Critical"
+          value={job.criticals || 0}
+          tone="text-red-600 dark:text-red-400"
+          clickable={Boolean(job.criticals)}
+          onClick={() => onOpenFindings('Critical')}
+          title={`Click to view critical findings in Vulnerability Management for ${job.targetProject}`}
+          activeColor="red"
+        />
+        <Stat
+          label="High"
+          value={job.highs || 0}
+          tone="text-orange-500 dark:text-orange-400"
+          clickable={Boolean(job.highs)}
+          onClick={() => onOpenFindings('High')}
+          title={`Click to view high findings in Vulnerability Management for ${job.targetProject}`}
+          activeColor="orange"
+        />
+        <Stat
+          label="Medium"
+          value={job.mediums || 0}
+          tone="text-amber-500 dark:text-amber-400"
+          clickable={Boolean(job.mediums)}
+          onClick={() => onOpenFindings('Medium')}
+          title={`Click to view medium findings in Vulnerability Management for ${job.targetProject}`}
+          activeColor="amber"
+        />
+        <Stat
+          label="Low"
+          value={job.lows || 0}
+          tone="text-sky-500 dark:text-sky-400"
+          clickable={Boolean(job.lows)}
+          onClick={() => onOpenFindings('Low')}
+          title={`Click to view low findings in Vulnerability Management for ${job.targetProject}`}
+          activeColor="sky"
+        />
       </div>
       {job.status === 'completed' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
@@ -456,12 +531,10 @@ const SingleResults: React.FC<{
                     key={vuln.id}
                     onClick={() => {
                       onClose();
-                      navigate(`/vulnerabilities/${encodeURIComponent(vuln.cve)}`, {
-                        state: { vulnerability: vuln },
-                      });
+                      navigate(`/vulnerabilities?project=${encodeURIComponent(job.targetProject)}&search=${encodeURIComponent(vuln.cve)}`);
                     }}
                     className="px-3.5 py-2 text-xs hover:bg-blue-50/70 dark:hover:bg-blue-950/40 transition-colors cursor-pointer group"
-                    title="Click to view vulnerability details"
+                    title={`Click to view ${vuln.cve} in Vulnerability Management for ${job.targetProject}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors flex items-center gap-1.5">
@@ -579,9 +652,74 @@ const BulkRows: React.FC<{
   );
 };
 
-const Stat: React.FC<{ label: string; value: number; tone?: string }> = ({ label, value, tone }) => (
-  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2">
-    <p className="text-[10px] uppercase tracking-wide text-gray-500">{label}</p>
-    <p className={`text-lg font-bold ${tone || 'text-gray-900 dark:text-white'}`}>{value}</p>
-  </div>
-);
+interface StatProps {
+  label: string;
+  value: number;
+  tone?: string;
+  clickable?: boolean;
+  onClick?: () => void;
+  title?: string;
+  badge?: string;
+  activeColor?: 'blue' | 'red' | 'orange' | 'amber' | 'sky';
+}
+
+const Stat: React.FC<StatProps> = ({
+  label,
+  value,
+  tone,
+  clickable,
+  onClick,
+  title,
+  badge,
+  activeColor = 'blue',
+}) => {
+  const colorMap = {
+    blue: 'hover:border-blue-500/80 hover:bg-blue-50/50 dark:hover:bg-blue-950/40 hover:shadow-xs focus:ring-blue-500/40',
+    red: 'hover:border-red-500/80 hover:bg-red-50/50 dark:hover:bg-red-950/40 hover:shadow-xs focus:ring-red-500/40',
+    orange: 'hover:border-orange-500/80 hover:bg-orange-50/50 dark:hover:bg-orange-950/40 hover:shadow-xs focus:ring-orange-500/40',
+    amber: 'hover:border-amber-500/80 hover:bg-amber-50/50 dark:hover:bg-amber-950/40 hover:shadow-xs focus:ring-amber-500/40',
+    sky: 'hover:border-sky-500/80 hover:bg-sky-50/50 dark:hover:bg-sky-950/40 hover:shadow-xs focus:ring-sky-500/40',
+  };
+
+  const content = (
+    <>
+      <div className="flex items-center justify-between gap-1 w-full">
+        <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500 dark:text-gray-400">
+          {label}
+        </span>
+        {clickable && (
+          <ExternalLink className="w-3 h-3 text-gray-400 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors opacity-70 group-hover:opacity-100 shrink-0" />
+        )}
+      </div>
+      <div className="flex items-baseline justify-between gap-1.5 mt-0.5">
+        <span className={`text-lg font-extrabold ${tone || 'text-gray-900 dark:text-white'}`}>
+          {value}
+        </span>
+        {badge && (
+          <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 opacity-90 group-hover:opacity-100 transition-opacity">
+            {badge}
+          </span>
+        )}
+      </div>
+    </>
+  );
+
+  if (clickable && onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className={`w-full text-left rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111827] px-3 py-2 cursor-pointer transition-all duration-150 group focus:outline-hidden focus:ring-2 active:scale-[0.98] ${colorMap[activeColor]}`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111827] px-3 py-2">
+      {content}
+    </div>
+  );
+};

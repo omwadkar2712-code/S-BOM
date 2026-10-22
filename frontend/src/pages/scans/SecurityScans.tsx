@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, NavLink } from 'react-router-dom';
 import {
   Folder,
@@ -35,13 +35,30 @@ import {
   Plus,
   ArrowLeft,
   User,
+  ChevronDown,
+  FileText,
+  FolderOpen,
 } from 'lucide-react';
 import { useAppState } from '../../context/AppStateContext';
 import type { ScanJob } from '../../types';
 import { ProjectApplicationSelect } from '../../components/common/ProjectApplicationSelect';
 import type { CatalogRecord } from '../../api/client';
-import { filesFromDataTransfer, fileTypesIn, folderLabel, folderTypeLabel, isArchiveName, isInsideSkippedDir, isManifestRelativePath, selectFolderManifests, SUPPORTED_MANIFEST_HINT, type FolderFile } from './localFolder';
+import {
+  filesFromDataTransfer,
+  fileTypesIn,
+  folderLabel,
+  folderStatsIn,
+  folderTypeLabel,
+  formatBytes,
+  isArchiveName,
+  isInsideSkippedDir,
+  isManifestRelativePath,
+  selectFolderManifests,
+  SUPPORTED_MANIFEST_HINT,
+  type FolderFile,
+} from './localFolder';
 import { classifyBulkCsv } from './bulkRows';
+import * as XLSX from 'xlsx';
 import { PipelineGrid, ScanResultDetails } from './ScanResultDetails';
 import { displayStatus, formatDuration, formatEventTime, isOpenStatus, stageLabel } from './scanProgress';
 import { ScanActionMenu } from './ScanActionMenu';
@@ -132,8 +149,51 @@ export const SecurityScans: React.FC = () => {
   const [selectedFolder, setSelectedFolder] = useState<string>('');
   const [localFile, setLocalFile] = useState<File | null>(null);
   const [localFolder, setLocalFolder] = useState<FolderFile[]>([]);
+  const [showFileTree, setShowFileTree] = useState(false);
+  const [fileFilter, setFileFilter] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const localFolderStats = useMemo(() => {
+    return folderStatsIn(localFolder);
+  }, [localFolder]);
+
+  const filteredLocalFiles = useMemo(() => {
+    if (!fileFilter.trim()) return localFolder;
+    const q = fileFilter.toLowerCase();
+    return localFolder.filter((item) => item.relativePath.toLowerCase().includes(q));
+  }, [localFolder, fileFilter]);
+
+  const [isDraggingOverCard, setIsDraggingOverCard] = useState(false);
+
+  // Local Source Upload Tabbed Modal State (matches user reference design)
+  const [localUploadModalOpen, setLocalUploadModalOpen] = useState(false);
+  const [localModalTab, setLocalModalTab] = useState<'files' | 'folder'>('files');
+  const [pendingLocalFile, setPendingLocalFile] = useState<File | null>(null);
+  const [pendingLocalFolder, setPendingLocalFolder] = useState<FolderFile[]>([]);
+  const modalFileInputRef = useRef<HTMLInputElement>(null);
+  const modalFolderInputRef = useRef<HTMLInputElement>(null);
+
+  const openLocalUploadModal = (initialTab: 'files' | 'folder' = 'files') => {
+    setLocalModalTab(localFolder.length > 0 ? 'folder' : initialTab);
+    setPendingLocalFile(localFile);
+    setPendingLocalFolder(localFolder);
+    setLocalUploadModalOpen(true);
+  };
+
+  const clearLocalSelection = () => {
+    setSelectedFolder('');
+    setLocalFile(null);
+    setLocalFolder([]);
+    setPendingLocalFile(null);
+    setPendingLocalFolder([]);
+    setShowFileTree(false);
+    setFileFilter('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (folderInputRef.current) folderInputRef.current.value = '';
+    if (modalFileInputRef.current) modalFileInputRef.current.value = '';
+    if (modalFolderInputRef.current) modalFolderInputRef.current.value = '';
+  };
 
   const openFolderPicker = () => {
     const input = folderInputRef.current;
@@ -152,7 +212,9 @@ export const SecurityScans: React.FC = () => {
     const input = fileInputRef.current;
     if (!input) return;
     input.value = '';
-    input.multiple = false;
+    input.multiple = true;
+    input.removeAttribute('webkitdirectory');
+    input.removeAttribute('directory');
     input.click();
   };
 
@@ -161,31 +223,62 @@ export const SecurityScans: React.FC = () => {
       const rel = item.relativePath.replace(/\\/g, '/');
       return rel !== '' && !isInsideSkippedDir(rel);
     });
-    const manifests = selectFolderManifests(items);
-    setSelectedFolder(folderTypeLabel(nonSkipped.length > 0 ? nonSkipped : items, manifests));
-    if (items.length === 0) {
+    const finalItems = nonSkipped.length > 0 ? nonSkipped : items;
+    const manifests = selectFolderManifests(finalItems);
+    setSelectedFolder(folderTypeLabel(finalItems, manifests));
+    if (finalItems.length === 0 || finalItems.every((item) => item.file.size === 0)) {
       setLocalFile(null);
       setLocalFolder([]);
+      setSelectedFolder('');
       addToast({
-        type: 'warning',
-        title: 'Empty folder',
-        message: 'The selected folder contains no files.',
+        type: 'error',
+        title: 'Empty Folder',
+        message: 'The selected folder contains no files or only empty files (0 bytes). Empty folders cannot be scanned.',
       });
       return;
     }
     setLocalFile(null);
     // Allow importing all files and folders within the selected folder
-    setLocalFolder(nonSkipped.length > 0 ? nonSkipped : items);
+    setLocalFolder(finalItems);
+
+    if (manifests.length > 0) {
+      const firstLower = manifests[0].file.name.toLowerCase();
+      if (firstLower.includes('cyclonedx') || firstLower === 'bom.json' || firstLower === 'bom.xml') {
+        setSbomFormat('CYCLONE DX');
+      } else if (firstLower.includes('spdx')) {
+        setSbomFormat('SPDX');
+      }
+    }
   };
 
   const acceptLocalDrop = async (dt: DataTransfer) => {
     const items = await filesFromDataTransfer(dt);
+    if (!items || items.length === 0) {
+      addToast({
+        type: 'error',
+        title: 'Empty Drop',
+        message: 'No files were dropped or the dropped item was empty. Empty items cannot be scanned.',
+      });
+      return;
+    }
     const nested = items.some((item) => item.relativePath.includes('/'));
     if (!nested && items.length === 1) {
+      const droppedFile = items[0].file;
+      if (droppedFile.size === 0) {
+        setLocalFile(null);
+        setLocalFolder([]);
+        setSelectedFolder('');
+        addToast({
+          type: 'error',
+          title: 'Empty File',
+          message: `The file "${droppedFile.name}" is empty (0 bytes). Empty files cannot be scanned.`,
+        });
+        return;
+      }
       setLocalFolder([]);
-      setLocalFile(items[0].file);
-      setSelectedFolder(items[0].file.name);
-      const name = items[0].file.name.toLowerCase();
+      setLocalFile(droppedFile);
+      setSelectedFolder(droppedFile.name);
+      const name = droppedFile.name.toLowerCase();
       if (name.includes('cyclonedx') || name === 'bom.json' || name === 'bom.xml') {
         setSbomFormat('CYCLONE DX');
       } else if (name.includes('spdx')) {
@@ -252,9 +345,27 @@ export const SecurityScans: React.FC = () => {
     });
   };
 
-  const handleBulkFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleBulkFile = async (file: File) => {
     if (!file) return;
+
+    if (file.size === 0) {
+      setUploadedBulk(null);
+      setBulkFileError(`The file "${file.name}" is empty (0 bytes).`);
+      setBulkProjects([]);
+      setBulkFile({
+        name: file.name,
+        size: '0.0 KB',
+        rowCount: 0,
+        uploadedAt: 'Empty file',
+      });
+      addToast({
+        type: 'error',
+        title: 'Empty File',
+        message: `The spreadsheet file "${file.name}" is empty (0 bytes). Empty files cannot be scanned.`,
+      });
+      if (bulkFileInputRef.current) bulkFileInputRef.current.value = '';
+      return;
+    }
 
     setUploadedBulk(file);
     const fileSizeKB = (file.size / 1024).toFixed(1) + ' KB';
@@ -264,10 +375,28 @@ export const SecurityScans: React.FC = () => {
     if (isCsv) {
       const reader = new FileReader();
       reader.onload = (event) => {
-        const text = event.target?.result as string;
-        if (!text) return;
+        const text = (event.target?.result as string) || '';
+        if (!text.trim()) {
+          setUploadedBulk(null);
+          setBulkFileError('The spreadsheet file contains no data.');
+          setBulkProjects([]);
+          setBulkFile({
+            name: fileName,
+            size: fileSizeKB,
+            rowCount: 0,
+            uploadedAt: 'Empty file',
+          });
+          addToast({
+            type: 'error',
+            title: 'Empty File',
+            message: `The file "${fileName}" contains no data rows. Empty spreadsheets cannot be scanned.`,
+          });
+          if (bulkFileInputRef.current) bulkFileInputRef.current.value = '';
+          return;
+        }
         const classified = classifyBulkCsv(text);
         if (classified.fileError) {
+          setUploadedBulk(null);
           setBulkFileError(classified.fileError);
           setBulkProjects([]);
           setBulkFile({
@@ -277,6 +406,25 @@ export const SecurityScans: React.FC = () => {
             uploadedAt: 'Cannot scan',
           });
           addToast({ type: 'error', title: 'Spreadsheet cannot be scanned', message: classified.fileError });
+          if (bulkFileInputRef.current) bulkFileInputRef.current.value = '';
+          return;
+        }
+        if (classified.rows.length === 0) {
+          setUploadedBulk(null);
+          setBulkFileError('The spreadsheet contains no project rows to scan.');
+          setBulkProjects([]);
+          setBulkFile({
+            name: fileName,
+            size: fileSizeKB,
+            rowCount: 0,
+            uploadedAt: 'Empty spreadsheet',
+          });
+          addToast({
+            type: 'error',
+            title: 'Empty Spreadsheet',
+            message: `The file "${fileName}" contains no data rows. Empty spreadsheets cannot be scanned.`,
+          });
+          if (bulkFileInputRef.current) bulkFileInputRef.current.value = '';
           return;
         }
         const skipped = classified.rows.filter((row) => row.rowStatus !== 'ready').length;
@@ -299,20 +447,60 @@ export const SecurityScans: React.FC = () => {
       };
       reader.readAsText(file);
     } else {
-      setBulkFileError('');
-      setBulkFile({
-        name: fileName,
-        size: fileSizeKB,
-        rowCount: 0,
-        uploadedAt: 'Checked on launch',
-      });
-      setBulkProjects([]);
-      addToast({
-        type: 'success',
-        title: 'Spreadsheet ready',
-        message: `${fileName} will be checked on launch. Duplicate projects and invalid rows are skipped, and the other rows are still scanned.`,
-      });
+      try {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = sheetName ? workbook.Sheets[sheetName] : null;
+        const rows = sheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' }) : [];
+        if (!sheet || rows.length === 0) {
+          setUploadedBulk(null);
+          setBulkFileError('The Excel file contains no data rows.');
+          setBulkProjects([]);
+          setBulkFile({
+            name: fileName,
+            size: fileSizeKB,
+            rowCount: 0,
+            uploadedAt: 'Empty spreadsheet',
+          });
+          addToast({
+            type: 'error',
+            title: 'Empty Spreadsheet',
+            message: `The Excel file "${fileName}" contains no data rows. Empty files cannot be scanned.`,
+          });
+          if (bulkFileInputRef.current) bulkFileInputRef.current.value = '';
+          return;
+        }
+        setBulkFileError('');
+        setBulkFile({
+          name: fileName,
+          size: fileSizeKB,
+          rowCount: rows.length,
+          uploadedAt: 'Checked on launch',
+        });
+        setBulkProjects([]);
+        addToast({
+          type: 'success',
+          title: 'Spreadsheet ready',
+          message: `Loaded ${fileName} (${rows.length} rows detected). Project verification will complete on launch.`,
+        });
+      } catch (err) {
+        setUploadedBulk(null);
+        setBulkFileError('Could not read Excel file.');
+        setBulkProjects([]);
+        addToast({
+          type: 'error',
+          title: 'Invalid File',
+          message: `Failed to parse Excel file "${fileName}". Please check the file.`,
+        });
+        if (bulkFileInputRef.current) bulkFileInputRef.current.value = '';
+      }
     }
+  };
+
+  const handleBulkFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) void handleBulkFile(file);
   };
 
   // Scan Configuration State
@@ -328,6 +516,8 @@ export const SecurityScans: React.FC = () => {
     setSelectedFolder('');
     setLocalFile(null);
     setLocalFolder([]);
+    setShowFileTree(false);
+    setFileFilter('');
     setGitUrl('');
     setGitBranch('main');
     setGitToken('');
@@ -439,17 +629,45 @@ export const SecurityScans: React.FC = () => {
         return;
       }
     }
-    if (sourceType === 'bulk' && bulkMode === 'file' && bulkFileError) {
-      addToast({ type: 'warning', title: 'Spreadsheet cannot be scanned', message: bulkFileError });
-      return;
+    if (sourceType === 'local') {
+      if (!localFile && localFolder.length === 0) {
+        addToast({ type: 'warning', title: 'Source Required', message: 'Choose a project folder, a single manifest file, or a .zip archive.' });
+        return;
+      }
+      if (localFile && localFile.size === 0) {
+        addToast({ type: 'error', title: 'Empty File', message: `The file "${localFile.name}" is empty (0 bytes). Empty files cannot be scanned.` });
+        return;
+      }
+      if (localFolder.length > 0 && localFolder.every((f) => f.file.size === 0)) {
+        addToast({ type: 'error', title: 'Empty Folder', message: 'The selected folder contains only empty files (0 bytes). Empty folders cannot be scanned.' });
+        return;
+      }
     }
-    if (sourceType === 'bulk' && bulkMode === 'file' && bulkProjects.length > 0 && bulkProjects.every((row) => row.rowStatus && row.rowStatus !== 'ready')) {
-      addToast({
-        type: 'warning',
-        title: 'Nothing to scan',
-        message: 'Every row is a duplicate project or invalid. Fix the spreadsheet and upload it again. Valid rows in a mixed file are still scanned.',
-      });
-      return;
+    if (sourceType === 'bulk' && bulkMode === 'file') {
+      if (!uploadedBulk) {
+        addToast({ type: 'warning', title: 'Spreadsheet Required', message: 'Upload a CSV or XLSX spreadsheet before proceeding.' });
+        return;
+      }
+      if (uploadedBulk.size === 0) {
+        addToast({ type: 'error', title: 'Empty File', message: `The spreadsheet file "${uploadedBulk.name}" is empty (0 bytes). Empty files cannot be scanned.` });
+        return;
+      }
+      if (bulkFileError) {
+        addToast({ type: 'error', title: 'Spreadsheet cannot be scanned', message: bulkFileError });
+        return;
+      }
+      if (bulkProjects.length === 0 && uploadedBulk.name.toLowerCase().endsWith('.csv')) {
+        addToast({ type: 'error', title: 'Empty Spreadsheet', message: 'The spreadsheet contains no project rows to scan.' });
+        return;
+      }
+      if (bulkProjects.length > 0 && bulkProjects.every((row) => row.rowStatus && row.rowStatus !== 'ready')) {
+        addToast({
+          type: 'warning',
+          title: 'Nothing to scan',
+          message: 'Every row is a duplicate project or invalid. Fix the spreadsheet and upload it again. Valid rows in a mixed file are still scanned.',
+        });
+        return;
+      }
     }
     setNewScanStep('review');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -458,17 +676,41 @@ export const SecurityScans: React.FC = () => {
   // Final Launch Scan (Excel Sr 8) -> Transitions to Live Jobs
   const handleFinalLaunchScan = async () => {
     const manualUrls = bulkScanList.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('https://github.com/'));
-    if (sourceType === 'local' && !localFile && localFolder.length === 0) {
-      addToast({ type: 'warning', title: 'Source required', message: 'Choose a project folder, a single manifest file, or a .zip archive.' });
-      return;
+    if (sourceType === 'local') {
+      if (!localFile && localFolder.length === 0) {
+        addToast({ type: 'warning', title: 'Source Required', message: 'Choose a project folder, a single manifest file, or a .zip archive.' });
+        return;
+      }
+      if (localFile && localFile.size === 0) {
+        addToast({ type: 'error', title: 'Empty File', message: `The file "${localFile.name}" is empty (0 bytes). Empty files cannot be scanned.` });
+        return;
+      }
+      if (localFolder.length > 0 && localFolder.every((f) => f.file.size === 0)) {
+        addToast({ type: 'error', title: 'Empty Folder', message: 'The selected folder contains only empty files (0 bytes). Empty folders cannot be scanned.' });
+        return;
+      }
     }
     if (sourceType === 'git' && !gitUrl.trim().startsWith('https://github.com/')) {
       addToast({ type: 'warning', title: 'GitHub URL required', message: 'Use a URL that starts with https://github.com/.' });
       return;
     }
-    if (sourceType === 'bulk' && bulkMode === 'file' && !uploadedBulk) {
-      addToast({ type: 'warning', title: 'Spreadsheet required', message: 'Upload a CSV or XLSX that uses the template columns.' });
-      return;
+    if (sourceType === 'bulk' && bulkMode === 'file') {
+      if (!uploadedBulk) {
+        addToast({ type: 'warning', title: 'Spreadsheet required', message: 'Upload a CSV or XLSX that uses the template columns.' });
+        return;
+      }
+      if (uploadedBulk.size === 0) {
+        addToast({ type: 'error', title: 'Empty File', message: `The spreadsheet file "${uploadedBulk.name}" is empty (0 bytes). Empty files cannot be scanned.` });
+        return;
+      }
+      if (bulkFileError) {
+        addToast({ type: 'error', title: 'Spreadsheet cannot be scanned', message: bulkFileError });
+        return;
+      }
+      if (bulkProjects.length === 0 && uploadedBulk.name.toLowerCase().endsWith('.csv')) {
+        addToast({ type: 'error', title: 'Empty Spreadsheet', message: 'The spreadsheet contains no project rows to scan.' });
+        return;
+      }
     }
     if (sourceType === 'bulk' && bulkMode === 'manual' && manualUrls.length === 0) {
       addToast({ type: 'warning', title: 'Repositories required', message: 'Enter one https://github.com/owner/repo URL per line.' });
@@ -1067,10 +1309,28 @@ export const SecurityScans: React.FC = () => {
                   {/* Card 1: Local Source Directory */}
                   <div
                     onClick={() => setSourceType('local')}
-                    className={`relative rounded-xl p-4 border transition-all cursor-pointer flex flex-col justify-between ${sourceType === 'local'
-                      ? 'border-sky-500 bg-sky-50/30 dark:bg-sky-950/20 shadow-xs ring-1 ring-sky-500/30'
-                      : 'border-gray-200 dark:border-gray-800 hover:border-gray-300'
-                      }`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingOverCard(true);
+                    }}
+                    onDragLeave={() => setIsDraggingOverCard(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingOverCard(false);
+                      setSourceType('local');
+                      if (e.dataTransfer) {
+                        acceptLocalDrop(e.dataTransfer);
+                      }
+                    }}
+                    className={`relative rounded-xl p-4 border transition-all cursor-pointer flex flex-col justify-between ${
+                      isDraggingOverCard
+                        ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/40 ring-2 ring-blue-500/50 shadow-md'
+                        : sourceType === 'local'
+                        ? 'border-sky-500 bg-sky-50/30 dark:bg-sky-950/20 shadow-xs ring-1 ring-sky-500/30'
+                        : 'border-gray-200 dark:border-gray-800 hover:border-gray-300'
+                    }`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="w-9 h-9 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-600 flex items-center justify-center">
@@ -1096,12 +1356,24 @@ export const SecurityScans: React.FC = () => {
                       onClick={(e) => {
                         e.stopPropagation();
                         setSourceType('local');
-                        openFolderPicker();
+                        openLocalUploadModal('files');
                       }}
-                      className="mt-4 w-full py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-2xs"
+                      className="mt-4 w-full py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-2xs flex items-center justify-center gap-1.5 transition-colors"
+                      title="Upload files or import a folder"
                     >
-                      Choose Folder/File
+                      <Upload className="w-3.5 h-3.5 shrink-0" />
+                      <span>Upload</span>
                     </button>
+                    {(localFolder.length > 0 || localFile) && (
+                      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium truncate">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">
+                          {localFolder.length > 0
+                            ? `${localFolder.length} files (${localFolderStats.totalFolders} folders)`
+                            : localFile?.name}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Card 2: Remote Git Repository (GitHub icon & text only, Excel Sr 3 & Sr 4) */}
@@ -1146,6 +1418,19 @@ export const SecurityScans: React.FC = () => {
                   {/* Card 3: Bulk Spreadsheet Orchestration */}
                   <div
                     onClick={() => setSourceType('bulk')}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSourceType('bulk');
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) {
+                        void handleBulkFile(file);
+                      }
+                    }}
                     className={`relative rounded-xl p-4 border transition-all cursor-pointer flex flex-col justify-between ${sourceType === 'bulk'
                       ? 'border-sky-500 bg-sky-50/30 dark:bg-sky-950/20 shadow-xs ring-1 ring-sky-500/30'
                       : 'border-gray-200 dark:border-gray-800 hover:border-gray-300'
@@ -1189,12 +1474,13 @@ export const SecurityScans: React.FC = () => {
                   {sourceType === 'local' && (
                     <div className="bg-gray-50/70 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 rounded-xl p-4 space-y-4">
                       <div
+                        onClick={() => openLocalUploadModal('files')}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => {
                           e.preventDefault();
                           void acceptLocalDrop(e.dataTransfer);
                         }}
-                        className="w-full border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center bg-white dark:bg-gray-800/60 hover:border-blue-400 transition-colors"
+                        className="w-full border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center bg-white dark:bg-gray-800/60 hover:border-blue-400 transition-colors cursor-pointer group"
                       >
                         <Folder className="w-8 h-8 text-blue-500 mx-auto mb-2" />
                         <p className="text-xs font-bold text-gray-900 dark:text-white">
@@ -1206,22 +1492,7 @@ export const SecurityScans: React.FC = () => {
                         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 max-w-xl mx-auto">
                           {SUPPORTED_MANIFEST_HINT}
                         </p>
-                        <div className="mt-3 flex items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openFolderPicker()}
-                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer"
-                          >
-                            Choose folder
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openFilePicker()}
-                            className="px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-600 rounded-lg text-xs font-semibold cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950/60 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-500 dark:hover:border-blue-400 hover:shadow-xs transition-all duration-150"
-                          >
-                            Choose file
-                          </button>
-                        </div>
+
                         <input
                           ref={folderInputRef}
                           type="file"
@@ -1240,30 +1511,28 @@ export const SecurityScans: React.FC = () => {
                           ref={fileInputRef}
                           type="file"
                           className="hidden"
+                          multiple
                           onChange={(e) => {
                             const picked = Array.from(e.target.files || []);
                             e.target.value = '';
                             if (picked.length === 0) return;
-                            if (picked.length === 1 && isArchiveName(picked[0].name)) {
+                            if (picked.length === 1) {
+                              const file = picked[0];
+                              if (file.size === 0) {
+                                setLocalFile(null);
+                                setLocalFolder([]);
+                                setSelectedFolder('');
+                                addToast({
+                                  type: 'error',
+                                  title: 'Empty File',
+                                  message: `The file "${file.name}" is empty (0 bytes). Empty files cannot be scanned.`,
+                                });
+                                return;
+                              }
                               setLocalFolder([]);
-                              setLocalFile(picked[0]);
-                              setSelectedFolder(picked[0].name);
-                              return;
-                            }
-                            const manifests = picked.filter((file) => isManifestRelativePath(file.name));
-                            if (manifests.length === 0) {
-                              addToast({
-                                type: 'warning',
-                                title: 'Unsupported file',
-                                message: `Choose a supported manifest or archive: ${SUPPORTED_MANIFEST_HINT}.`,
-                              });
-                              return;
-                            }
-                            if (manifests.length === 1) {
-                              setLocalFolder([]);
-                              setLocalFile(manifests[0]);
-                              setSelectedFolder(manifests[0].name);
-                              const name = manifests[0].name.toLowerCase();
+                              setLocalFile(file);
+                              setSelectedFolder(file.name);
+                              const name = file.name.toLowerCase();
                               if (name.includes('cyclonedx') || name === 'bom.json' || name === 'bom.xml') {
                                 setSbomFormat('CYCLONE DX');
                               } else if (name.includes('spdx')) {
@@ -1271,18 +1540,213 @@ export const SecurityScans: React.FC = () => {
                               }
                               return;
                             }
-                            const items = manifests.map((file) => ({ file, relativePath: file.name }));
-                            setLocalFile(null);
-                            setLocalFolder(items);
-                            setSelectedFolder(folderLabel(items));
+                            const valid = picked.filter((f) => f.size > 0);
+                            if (valid.length === 0) {
+                              setLocalFile(null);
+                              setLocalFolder([]);
+                              setSelectedFolder('');
+                              addToast({
+                                type: 'error',
+                                title: 'Empty Files',
+                                message: 'All selected files are empty (0 bytes). Empty files cannot be scanned.',
+                              });
+                              return;
+                            }
+                            const items: FolderFile[] = valid.map((file) => ({
+                              file,
+                              relativePath: (file as any).webkitRelativePath || file.name,
+                            }));
+                            useFolderManifests(items);
                           }}
                         />
-                        {selectedFolder && (
-                          <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
-                            <p className="text-[11px] text-gray-600 dark:text-gray-300 font-mono">{selectedFolder}</p>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                              {getPrimaryFormatLabel()}
-                            </span>
+
+                        {/* Selected Folder Summary & Tree Inspector */}
+                        {localFolder.length > 0 && (
+                          <div className="mt-4 p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 text-left space-y-3 animate-in fade-in duration-150">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
+                                  <FolderOpen className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h4 className="text-sm font-bold text-gray-900 dark:text-white font-mono break-all">
+                                      {localFolder[0]?.relativePath.replace(/\\/g, '/').split('/')[0] || selectedFolder}
+                                    </h4>
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3" /> All files & folders ready
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700">
+                                      {getPrimaryFormatLabel()}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                                    <span className="font-semibold text-gray-900 dark:text-white">{localFolderStats.totalFiles} files</span>
+                                    {localFolderStats.totalFolders > 0 && (
+                                      <span> across <span className="font-semibold text-gray-900 dark:text-white">{localFolderStats.totalFolders} subfolder{localFolderStats.totalFolders === 1 ? '' : 's'}</span></span>
+                                    )}
+                                    <span> · {formatBytes(localFolderStats.totalBytes)}</span>
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => openLocalUploadModal('folder')}
+                                  className="px-2.5 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-100/60 dark:hover:bg-blue-900/40 rounded-lg transition-colors cursor-pointer"
+                                  title="Change to another folder"
+                                >
+                                  Change
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={clearLocalSelection}
+                                  className="px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors cursor-pointer"
+                                  title="Remove selection"
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Scope confirmation banner */}
+                            <div className="p-2.5 bg-white dark:bg-gray-800/80 rounded-lg border border-blue-100 dark:border-blue-900/30 flex items-center justify-between text-xs flex-wrap gap-2">
+                              <div className="flex items-center gap-2">
+                                <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                <span className="text-gray-700 dark:text-gray-300 text-[11px]">
+                                  System will package and scan <strong>all files and folders</strong> in this directory.
+                                </span>
+                              </div>
+                              {localFolderStats.manifests.length > 0 ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                  {localFolderStats.manifests.length} manifest{localFolderStats.manifests.length === 1 ? '' : 's'} ({localFolderStats.ecosystems.join(', ')})
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                  Generic source scan (all files analyzed)
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Interactive tree/file inspector */}
+                            <div className="pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setShowFileTree((prev) => !prev)}
+                                className="text-xs font-semibold text-blue-700 dark:text-blue-300 hover:underline flex items-center gap-1.5 cursor-pointer py-0.5"
+                              >
+                                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showFileTree ? 'rotate-180' : ''}`} />
+                                <span>
+                                  {showFileTree
+                                    ? 'Hide imported files and folders'
+                                    : `Inspect all imported files and folders (${localFolderStats.totalFiles} files)`}
+                                </span>
+                              </button>
+
+                              {showFileTree && (
+                                <div className="mt-2 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-2.5 space-y-2">
+                                  <div className="relative">
+                                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-gray-400" />
+                                    <input
+                                      type="text"
+                                      value={fileFilter}
+                                      onChange={(e) => setFileFilter(e.target.value)}
+                                      placeholder="Filter files or subfolders..."
+                                      className="w-full text-xs pl-8 pr-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    />
+                                    {fileFilter && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setFileFilter('')}
+                                        className="absolute right-2 top-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <div className="max-h-60 overflow-y-auto space-y-0.5 text-xs font-mono divide-y divide-gray-100 dark:divide-gray-800/60 pr-1">
+                                    {filteredLocalFiles.length === 0 ? (
+                                      <p className="text-center py-4 text-xs text-gray-400 font-sans">
+                                        No files matching "{fileFilter}"
+                                      </p>
+                                    ) : (
+                                      filteredLocalFiles.map((item, idx) => {
+                                        const rel = item.relativePath.replace(/\\/g, '/');
+                                        const isManifest = isManifestRelativePath(rel);
+                                        const hasSubdir = rel.includes('/');
+                                        return (
+                                          <div
+                                            key={idx}
+                                            className="py-1 px-1.5 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded transition-colors gap-2"
+                                          >
+                                            <span className="truncate text-gray-800 dark:text-gray-200 flex items-center gap-1.5 min-w-0">
+                                              <span className="text-gray-400 shrink-0">
+                                                {hasSubdir ? '📁' : '📄'}
+                                              </span>
+                                              <span className="truncate">{rel}</span>
+                                              {isManifest && (
+                                                <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-sans px-1 rounded shrink-0 font-semibold">
+                                                  manifest
+                                                </span>
+                                              )}
+                                            </span>
+                                            <span className="text-gray-400 text-[10px] shrink-0 font-sans">
+                                              {formatBytes(item.file.size)}
+                                            </span>
+                                          </div>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Selected Single File Summary */}
+                        {localFile && (
+                          <div className="mt-4 p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 text-left space-y-2 animate-in fade-in duration-150">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
+                                  <FileText className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h4 className="text-sm font-bold text-gray-900 dark:text-white font-mono break-all">
+                                      {localFile.name}
+                                    </h4>
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3" /> File ready
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700">
+                                      {getPrimaryFormatLabel()}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                                    {formatBytes(localFile.size)} · Single file source
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => openLocalUploadModal('files')}
+                                  className="px-2.5 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-100/60 dark:hover:bg-blue-900/40 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  Change
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={clearLocalSelection}
+                                  className="px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1392,6 +1856,18 @@ export const SecurityScans: React.FC = () => {
                           {/* Dropzone & Upload Button */}
                           <div
                             onClick={() => bulkFileInputRef.current?.click()}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const file = e.dataTransfer.files?.[0];
+                              if (file) {
+                                void handleBulkFile(file);
+                              }
+                            }}
                             className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-5 text-center bg-white dark:bg-gray-800/60 hover:border-blue-400 dark:hover:border-blue-500 transition-colors cursor-pointer group"
                           >
                             <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 flex items-center justify-center mx-auto mb-2 group-hover:scale-105 transition-transform">
@@ -1655,6 +2131,15 @@ export const SecurityScans: React.FC = () => {
                           {sourceType === 'local' ? selectedFolder : sourceType === 'git' ? gitUrl : `${bulkFile.name} (${bulkProjects.length} Projects)`}
                         </span>
                       </div>
+                      {sourceType === 'local' && localFolder.length > 0 && (
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-gray-500">Import Scope:</span>
+                          <span className="font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            All {localFolderStats.totalFiles} files across {localFolderStats.totalFolders} folders
+                          </span>
+                        </div>
+                      )}
                       <div className="flex justify-between items-center">
                         <span className="text-gray-500">Primary Format:</span>
                         <select
@@ -1840,6 +2325,17 @@ export const SecurityScans: React.FC = () => {
                       {rescanningId === activeScan.id ? 'Queuing' : 'Rescan'}
                     </button>
                   )}
+                  {activeScan.status === 'completed' && (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(activeScan.targetProject)}`)}
+                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-2xs flex items-center gap-1.5 transition-colors"
+                      title={`View all findings for ${activeScan.targetProject} in Vulnerability Management`}
+                    >
+                      <Shield className="w-3.5 h-3.5" />
+                      <span>View Findings ({activeScan.cvesFound || 0})</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setSelectedScanId(activeScan.id)}
@@ -1920,12 +2416,72 @@ export const SecurityScans: React.FC = () => {
 
               {activeScan.status === 'completed' && !activeScan.isBulkAggregate && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Components</p><p className="text-lg font-bold text-gray-900 dark:text-white">{activeScan.componentsFound}</p></div>
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Findings</p><p className="text-lg font-bold text-gray-900 dark:text-white">{activeScan.cvesFound}</p></div>
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Critical</p><p className="text-lg font-bold text-red-600">{activeScan.criticals || 0}</p></div>
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">High</p><p className="text-lg font-bold text-orange-500">{activeScan.highs || 0}</p></div>
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Medium</p><p className="text-lg font-bold text-amber-500">{activeScan.mediums || 0}</p></div>
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2"><p className="text-gray-500">Low</p><p className="text-lg font-bold text-sky-500">{activeScan.lows || 0}</p></div>
+                  <div
+                    onClick={() => navigate(`/software-inventory?project=${encodeURIComponent(activeScan.targetProject)}`)}
+                    className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2 cursor-pointer hover:border-blue-400 hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-all group"
+                    title={`View ${activeScan.componentsFound} components in Software Inventory`}
+                  >
+                    <p className="text-gray-500 flex items-center justify-between">
+                      <span>Components</span>
+                      <ExternalLink className="w-3 h-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </p>
+                    <p className="text-lg font-bold text-gray-900 dark:text-white">{activeScan.componentsFound}</p>
+                  </div>
+                  <div
+                    onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(activeScan.targetProject)}`)}
+                    className="rounded-lg border border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-950/30 px-3 py-2 cursor-pointer hover:border-blue-500 hover:bg-blue-100/50 dark:hover:bg-blue-900/40 transition-all group ring-1 ring-blue-500/20 shadow-2xs"
+                    title={`Click to view all ${activeScan.cvesFound} findings in Vulnerability Management for ${activeScan.targetProject}`}
+                  >
+                    <p className="text-blue-600 dark:text-blue-400 font-bold flex items-center justify-between">
+                      <span>Findings</span>
+                      <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </p>
+                    <p className="text-lg font-bold text-blue-700 dark:text-blue-300">{activeScan.cvesFound}</p>
+                  </div>
+                  <div
+                    onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(activeScan.targetProject)}&severity=Critical`)}
+                    className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2 cursor-pointer hover:border-red-400 hover:bg-red-50/30 dark:hover:bg-red-950/20 transition-all group"
+                    title={`Click to view critical findings in Vulnerability Management`}
+                  >
+                    <p className="text-gray-500 flex items-center justify-between">
+                      <span>Critical</span>
+                      <ExternalLink className="w-3 h-3 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </p>
+                    <p className="text-lg font-bold text-red-600">{activeScan.criticals || 0}</p>
+                  </div>
+                  <div
+                    onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(activeScan.targetProject)}&severity=High`)}
+                    className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2 cursor-pointer hover:border-orange-400 hover:bg-orange-50/30 dark:hover:bg-orange-950/20 transition-all group"
+                    title={`Click to view high findings in Vulnerability Management`}
+                  >
+                    <p className="text-gray-500 flex items-center justify-between">
+                      <span>High</span>
+                      <ExternalLink className="w-3 h-3 text-orange-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </p>
+                    <p className="text-lg font-bold text-orange-500">{activeScan.highs || 0}</p>
+                  </div>
+                  <div
+                    onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(activeScan.targetProject)}&severity=Medium`)}
+                    className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2 cursor-pointer hover:border-amber-400 hover:bg-amber-50/30 dark:hover:bg-amber-950/20 transition-all group"
+                    title={`Click to view medium findings in Vulnerability Management`}
+                  >
+                    <p className="text-gray-500 flex items-center justify-between">
+                      <span>Medium</span>
+                      <ExternalLink className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </p>
+                    <p className="text-lg font-bold text-amber-500">{activeScan.mediums || 0}</p>
+                  </div>
+                  <div
+                    onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(activeScan.targetProject)}&severity=Low`)}
+                    className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2 cursor-pointer hover:border-sky-400 hover:bg-sky-50/30 dark:hover:bg-sky-950/20 transition-all group"
+                    title={`Click to view low findings in Vulnerability Management`}
+                  >
+                    <p className="text-gray-500 flex items-center justify-between">
+                      <span>Low</span>
+                      <ExternalLink className="w-3 h-3 text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </p>
+                    <p className="text-lg font-bold text-sky-500">{activeScan.lows || 0}</p>
+                  </div>
                 </div>
               )}
 
@@ -2061,10 +2617,20 @@ export const SecurityScans: React.FC = () => {
                       </td>
                       <td className="py-3 font-semibold text-gray-900 dark:text-white">{job.componentsFound}</td>
                       <td className="py-3">
-                        <span className="text-red-600 dark:text-red-400 font-semibold">{job.criticals || 0} Crit</span> •{' '}
-                        <span className="text-orange-500 dark:text-orange-400 font-semibold">{job.highs || 0} High</span> •{' '}
-                        <span className="text-amber-500 dark:text-amber-400 font-semibold">{job.mediums || 0} Med</span> •{' '}
-                        <span className="text-sky-500 dark:text-sky-400 font-semibold">{job.lows || 0} Low</span>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/vulnerabilities?project=${encodeURIComponent(job.targetProject)}`)}
+                          className="text-left hover:underline cursor-pointer group flex items-center gap-1.5"
+                          title={`View findings for ${job.targetProject} in Vulnerability Management`}
+                        >
+                          <span>
+                            <span className="text-red-600 dark:text-red-400 font-semibold">{job.criticals || 0} Crit</span> •{' '}
+                            <span className="text-orange-500 dark:text-orange-400 font-semibold">{job.highs || 0} High</span> •{' '}
+                            <span className="text-amber-500 dark:text-amber-400 font-semibold">{job.mediums || 0} Med</span> •{' '}
+                            <span className="text-sky-500 dark:text-sky-400 font-semibold">{job.lows || 0} Low</span>
+                          </span>
+                          <ExternalLink className="w-3 h-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                        </button>
                       </td>
                       <td className="py-3 text-right">
                         <div className="inline-flex items-center justify-end">
@@ -2409,6 +2975,298 @@ export const SecurityScans: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Local Source Upload Tabbed Modal (Matches User Reference Image) */}
+      {localUploadModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-[#111827] rounded-xl max-w-xl w-full shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+            {/* Tab Bar Header */}
+            <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 pt-3.5 bg-gray-50/50 dark:bg-gray-900/40">
+              <div className="flex items-center gap-8">
+                <button
+                  type="button"
+                  onClick={() => setLocalModalTab('files')}
+                  className={`pb-3 text-sm font-bold transition-all relative cursor-pointer ${
+                    localModalTab === 'files'
+                      ? 'text-blue-600 dark:text-blue-400'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  Upload Files
+                  {localModalTab === 'files' && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLocalModalTab('folder')}
+                  className={`pb-3 text-sm font-bold transition-all relative cursor-pointer ${
+                    localModalTab === 'folder'
+                      ? 'text-blue-600 dark:text-blue-400'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  Import Folder
+                  {localModalTab === 'folder' && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400" />
+                  )}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLocalUploadModalOpen(false)}
+                className="pb-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              {/* Dashed Dropzone */}
+              <div
+                onClick={() => {
+                  if (localModalTab === 'files') {
+                    modalFileInputRef.current?.click();
+                  } else {
+                    modalFolderInputRef.current?.click();
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (localModalTab === 'files') {
+                    const file = e.dataTransfer.files?.[0];
+                    if (!file) return;
+                    if (file.size === 0) {
+                      addToast({
+                        type: 'error',
+                        title: 'Empty File',
+                        message: `The file "${file.name}" is empty (0 bytes). Empty files cannot be scanned.`,
+                      });
+                      return;
+                    }
+                    setPendingLocalFile(file);
+                    setPendingLocalFolder([]);
+                  } else {
+                    const items = await filesFromDataTransfer(e.dataTransfer);
+                    if (!items || items.length === 0 || items.every((f) => f.file.size === 0)) {
+                      addToast({
+                        type: 'error',
+                        title: 'Empty Folder',
+                        message: 'The selected folder contains no files or only empty files (0 bytes). Empty folders cannot be scanned.',
+                      });
+                      return;
+                    }
+                    setPendingLocalFolder(items);
+                    setPendingLocalFile(null);
+                  }
+                }}
+                className="border border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 sm:p-7 text-center bg-gray-50/50 dark:bg-gray-800/30 hover:border-blue-500 dark:hover:border-blue-400 transition-colors cursor-pointer group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-2.5 group-hover:scale-105 transition-transform">
+                  {localModalTab === 'files' ? (
+                    <FileText className="w-5 h-5" />
+                  ) : (
+                    <Folder className="w-5 h-5" />
+                  )}
+                </div>
+                <p className="text-xs font-bold text-blue-600 dark:text-blue-400 group-hover:underline">
+                  {localModalTab === 'files' ? 'Drag & Drop or Browse files.' : 'Drag & Drop or Browse folder.'}
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                  Max size limit 400 MB
+                </p>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                  {localModalTab === 'files'
+                    ? 'Max no of file(s) 25 · Supports package manifests, .zip, .tar.gz, CycloneDX, SPDX'
+                    : 'Imports all files & subfolders within the selected directory'}
+                </p>
+
+                <input
+                  ref={modalFileInputRef}
+                  type="file"
+                  multiple={false}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file) return;
+                    if (file.size === 0) {
+                      addToast({
+                        type: 'error',
+                        title: 'Empty File',
+                        message: `The file "${file.name}" is empty (0 bytes). Empty files cannot be scanned.`,
+                      });
+                      return;
+                    }
+                    setPendingLocalFile(file);
+                    setPendingLocalFolder([]);
+                  }}
+                />
+                <input
+                  ref={modalFolderInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  // @ts-expect-error webkitdirectory standard folder attribute
+                  webkitdirectory=""
+                  directory=""
+                  onChange={(e) => {
+                    const picked = Array.from(e.target.files || []);
+                    e.target.value = '';
+                    if (picked.length === 0) return;
+                    const items: FolderFile[] = picked.map((file) => ({
+                      file,
+                      relativePath: (file as any).webkitRelativePath || file.name,
+                    }));
+                    const nonSkipped = items.filter((item) => {
+                      const rel = item.relativePath.replace(/\\/g, '/');
+                      return rel !== '' && !isInsideSkippedDir(rel);
+                    });
+                    const finalItems = nonSkipped.length > 0 ? nonSkipped : items;
+                    if (finalItems.length === 0 || finalItems.every((item) => item.file.size === 0)) {
+                      addToast({
+                        type: 'error',
+                        title: 'Empty Folder',
+                        message: 'The selected folder contains no files or only empty files (0 bytes). Empty folders cannot be scanned.',
+                      });
+                      return;
+                    }
+                    setPendingLocalFolder(finalItems);
+                    setPendingLocalFile(null);
+                  }}
+                />
+              </div>
+
+              {/* Preview Section */}
+              <div className="space-y-1.5 pt-1">
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+                  Preview:
+                </label>
+                {localModalTab === 'files' && pendingLocalFile ? (
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-200 shadow-2xs">
+                    <FileText className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span className="font-medium max-w-xs truncate">{pendingLocalFile.name}</span>
+                    <span className="text-[10px] text-gray-400">({formatBytes(pendingLocalFile.size)})</span>
+                    <button
+                      type="button"
+                      onClick={() => setPendingLocalFile(null)}
+                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-full cursor-pointer ml-1"
+                      title="Remove file"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : localModalTab === 'folder' && pendingLocalFolder.length > 0 ? (
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-200 shadow-2xs">
+                    <Folder className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span className="font-medium max-w-xs truncate">
+                      {pendingLocalFolder[0]?.relativePath.replace(/\\/g, '/').split('/')[0] || 'Project Folder'}
+                    </span>
+                    <span className="text-[10px] text-gray-400">
+                      ({pendingLocalFolder.length} files, {formatBytes(pendingLocalFolder.reduce((acc, f) => acc + f.file.size, 0))})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPendingLocalFolder([])}
+                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-full cursor-pointer ml-1"
+                      title="Remove folder"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400 italic py-1">
+                    No {localModalTab === 'files' ? 'file' : 'folder'} selected yet
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-100 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setLocalUploadModalOpen(false)}
+                  className="px-4 py-1.5 rounded-md border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 text-xs font-medium cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (localModalTab === 'files') {
+                      if (!pendingLocalFile) {
+                        addToast({
+                          type: 'warning',
+                          title: 'File Required',
+                          message: 'Please browse or drag and drop a file before uploading.',
+                        });
+                        return;
+                      }
+                      if (pendingLocalFile.size === 0) {
+                        addToast({
+                          type: 'error',
+                          title: 'Empty File',
+                          message: `The file "${pendingLocalFile.name}" is empty (0 bytes). Empty files cannot be scanned.`,
+                        });
+                        return;
+                      }
+                      setLocalFolder([]);
+                      setLocalFile(pendingLocalFile);
+                      setSelectedFolder(pendingLocalFile.name);
+                      const name = pendingLocalFile.name.toLowerCase();
+                      if (name.includes('cyclonedx') || name === 'bom.json' || name === 'bom.xml') {
+                        setSbomFormat('CYCLONE DX');
+                      } else if (name.includes('spdx')) {
+                        setSbomFormat('SPDX');
+                      }
+                      setLocalUploadModalOpen(false);
+                      addToast({
+                        type: 'success',
+                        title: 'File Ready',
+                        message: `Loaded ${pendingLocalFile.name} (${formatBytes(pendingLocalFile.size)}) for local scan.`,
+                      });
+                    } else {
+                      if (pendingLocalFolder.length === 0) {
+                        addToast({
+                          type: 'warning',
+                          title: 'Folder Required',
+                          message: 'Please browse or drag and drop a project folder before uploading.',
+                        });
+                        return;
+                      }
+                      if (pendingLocalFolder.every((f) => f.file.size === 0)) {
+                        addToast({
+                          type: 'error',
+                          title: 'Empty Folder',
+                          message: 'The selected folder contains no files or only empty files (0 bytes). Empty folders cannot be scanned.',
+                        });
+                        return;
+                      }
+                      useFolderManifests(pendingLocalFolder);
+                      setLocalUploadModalOpen(false);
+                      addToast({
+                        type: 'success',
+                        title: 'Folder Ready',
+                        message: `Imported folder with ${pendingLocalFolder.length} files for local scan.`,
+                      });
+                    }
+                  }}
+                  className="px-5 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer shadow-sm shadow-blue-500/20 transition-colors"
+                >
+                  Upload
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

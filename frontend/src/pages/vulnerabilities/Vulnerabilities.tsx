@@ -43,6 +43,14 @@ export const Vulnerabilities: React.FC = () => {
     if (urlProj && urlProj !== projectFilter) {
       setProjectFilter(urlProj);
     }
+    const urlSev = searchParams.get('severity');
+    if (urlSev && urlSev !== selectedSeverity) {
+      setSelectedSeverity(urlSev);
+    }
+    const urlSearch = searchParams.get('search');
+    if (urlSearch !== null && urlSearch !== searchQuery) {
+      setSearchQuery(urlSearch);
+    }
   }, [searchParams]);
 
   // Derive all real projects (NO hardcoded dummy data)
@@ -53,12 +61,17 @@ export const Vulnerabilities: React.FC = () => {
     });
     vulnerabilities.forEach((v) => {
       if (v.project) set.add(v.project);
+      if (v.application) set.add(v.application);
     });
     components.forEach((c) => {
       if (c.project) set.add(c.project);
+      if (c.projectApplication) set.add(c.projectApplication);
     });
+    if (projectFilter && projectFilter !== 'all') {
+      set.add(projectFilter);
+    }
     return Array.from(set).sort();
-  }, [projects, vulnerabilities, components]);
+  }, [projects, vulnerabilities, components, projectFilter]);
 
   // Handle project filter changes
   const handleProjectFilterChange = (val: string) => {
@@ -74,8 +87,13 @@ export const Vulnerabilities: React.FC = () => {
 
   // Severity counts based on currently selected project
   const projectScopedVulns = useMemo(() => {
-    if (projectFilter === 'all') return vulnerabilities;
-    return vulnerabilities.filter((v) => v.project.toLowerCase() === projectFilter.toLowerCase());
+    if (!projectFilter || projectFilter === 'all') return vulnerabilities;
+    const target = projectFilter.toLowerCase().trim();
+    return vulnerabilities.filter((v) => {
+      const p = (v.project || '').toLowerCase().trim();
+      const a = (v.application || '').toLowerCase().trim();
+      return p === target || a === target || (target.length > 2 && (p.includes(target) || a.includes(target)));
+    });
   }, [vulnerabilities, projectFilter]);
 
   const criticalCount = useMemo(() => projectScopedVulns.filter((v) => v.severity === 'Critical').length, [projectScopedVulns]);
@@ -342,7 +360,25 @@ export const Vulnerabilities: React.FC = () => {
       {/* Top Container with No Blank Space Above Metric Boxes */}
       <div className="bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl p-4 sm:p-5 shadow-2xs space-y-4">
         {/* Project Scope Dropdown Row */}
-        <div className="flex items-center justify-end">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          {projectFilter !== 'all' ? (
+            <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800/80 rounded-xl text-xs text-blue-900 dark:text-blue-200">
+              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+              <span>
+                Filtered by project: <strong className="font-bold">{projectFilter}</strong> ({projectScopedVulns.length} vulnerabilities)
+              </span>
+              <button
+                type="button"
+                onClick={() => handleProjectFilterChange('all')}
+                className="ml-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 underline cursor-pointer"
+              >
+                Clear
+              </button>
+            </div>
+          ) : (
+            <div />
+          )}
+
           <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-1.5 shadow-2xs hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
               <Folder className="w-4 h-4 text-gray-400" />
               <select

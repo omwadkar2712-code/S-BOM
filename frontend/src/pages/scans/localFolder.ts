@@ -52,10 +52,62 @@ export function selectFolderManifests(items: FolderFile[]): FolderFile[] {
   });
 }
 
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i] || 'B'}`;
+}
+
+export interface FolderStats {
+  totalFiles: number;
+  totalFolders: number;
+  folders: string[];
+  manifests: FolderFile[];
+  ecosystems: string[];
+  types: string[];
+  totalBytes: number;
+}
+
+export function folderStatsIn(items: FolderFile[]): FolderStats {
+  const folders = new Set<string>();
+  let totalBytes = 0;
+  for (const item of items) {
+    if (isInsideSkippedDir(item.relativePath)) continue;
+    const rel = item.relativePath.replace(/\\/g, '/');
+    const parts = rel.split('/').filter(Boolean);
+    for (let i = 1; i < parts.length; i++) {
+      folders.add(parts.slice(0, i).join('/'));
+    }
+    totalBytes += item.file.size || 0;
+  }
+  const manifests = selectFolderManifests(items);
+  const ecosystems = ecosystemsIn(manifests);
+  const types = fileTypesIn(items);
+  return {
+    totalFiles: items.length,
+    totalFolders: folders.size,
+    folders: Array.from(folders).sort(),
+    manifests,
+    ecosystems,
+    types,
+    totalBytes,
+  };
+}
+
 export function folderLabel(items: FolderFile[]): string {
   const first = items[0]?.relativePath.replace(/\\/g, '/').split('/')[0] || 'folder';
-  const noun = items.length === 1 ? 'manifest' : 'manifests';
-  return `${first} (${items.length} ${noun})`;
+  const folders = new Set<string>();
+  for (const item of items) {
+    const parts = item.relativePath.replace(/\\/g, '/').split('/').filter(Boolean);
+    for (let i = 1; i < parts.length; i++) {
+      folders.add(parts.slice(0, i).join('/'));
+    }
+  }
+  const noun = items.length === 1 ? 'file' : 'files';
+  const folderPart = folders.size > 0 ? ` · ${folders.size} folder${folders.size === 1 ? '' : 's'}` : '';
+  return `${first} (${items.length} ${noun}${folderPart})`;
 }
 
 export function fileTypesIn(items: FolderFile[]): string[] {
@@ -115,18 +167,27 @@ export function ecosystemsIn(items: FolderFile[]): string[] {
 
 export function folderTypeLabel(all: FolderFile[], manifests: FolderFile[]): string {
   const root = all[0]?.relativePath.replace(/\\/g, '/').split('/')[0] || 'folder';
-  const ecosystems = ecosystemsIn(manifests);
-  const ecoPreview = ecosystems.slice(0, 8).join(', ');
-  const ecoMore = ecosystems.length > 8 ? ` +${ecosystems.length - 8} more` : '';
-  const types = fileTypesIn(all);
-  const typePreview = types.slice(0, 10).join(', ');
-  const typeMore = types.length > 10 ? ` +${types.length - 10} more` : '';
-  const manifestNoun = manifests.length === 1 ? 'manifest' : 'manifests';
-  const ecoNoun = ecosystems.length === 1 ? 'ecosystem' : 'ecosystems';
-  if (ecosystems.length > 0) {
-    return `${root} (${manifests.length} ${manifestNoun} · ${ecosystems.length} ${ecoNoun}: ${ecoPreview}${ecoMore})`;
+  const folders = new Set<string>();
+  for (const item of all) {
+    const parts = item.relativePath.replace(/\\/g, '/').split('/').filter(Boolean);
+    for (let i = 1; i < parts.length; i++) {
+      folders.add(parts.slice(0, i).join('/'));
+    }
   }
-  return `${root} (${manifests.length} ${manifestNoun} · file types: ${typePreview}${typeMore})`;
+  const folderCount = folders.size;
+  const fileNoun = all.length === 1 ? 'file' : 'files';
+  const folderNoun = folderCount === 1 ? 'folder' : 'folders';
+  const ecosystems = ecosystemsIn(manifests);
+  const ecoPreview = ecosystems.slice(0, 5).join(', ');
+  const ecoMore = ecosystems.length > 5 ? ` +${ecosystems.length - 5} more` : '';
+  const manifestNoun = manifests.length === 1 ? 'manifest' : 'manifests';
+
+  const folderPart = folderCount > 0 ? ` · ${folderCount} ${folderNoun}` : '';
+  const manifestPart = manifests.length > 0
+    ? ` · ${manifests.length} ${manifestNoun}${ecosystems.length > 0 ? ` (${ecoPreview}${ecoMore})` : ''}`
+    : '';
+
+  return `${root} (${all.length} ${fileNoun}${folderPart}${manifestPart})`;
 }
 
 export async function filesFromDataTransfer(dt: DataTransfer): Promise<FolderFile[]> {

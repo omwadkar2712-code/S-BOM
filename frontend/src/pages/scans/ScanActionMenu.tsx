@@ -196,6 +196,7 @@ export const ScanActionMenu: React.FC<ScanActionMenuProps> = ({
               </div>
             </button>
 
+
             {/* Option 2: Export */}
             <div className="mt-1 pt-1 border-t border-gray-100 dark:border-gray-800/80">
               <button

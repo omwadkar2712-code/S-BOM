@@ -54,3 +54,22 @@ def test_missing_column_rejects_the_file():
         assert "project_name" in str(exc)
     else:
         raise AssertionError("expected missing column")
+
+
+def test_empty_bulk_file_rejects():
+    try:
+        parse_bulk("projects.csv", b"", 1024)
+    except ValueError as exc:
+        assert "empty file" in str(exc).lower()
+    else:
+        raise AssertionError("expected empty file error")
+
+
+def test_empty_spreadsheet_no_data_rows_rejects():
+    try:
+        parse_bulk("projects.csv", HEADER.encode(), 1024)
+    except ValueError as exc:
+        assert "empty file" in str(exc).lower()
+    else:
+        raise AssertionError("expected empty file error")
+

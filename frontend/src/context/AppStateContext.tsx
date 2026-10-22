@@ -153,6 +153,7 @@ interface AppStateContextType {
   addProject: (newProj: Partial<Project>) => Promise<void>;
   addComponent: (newComp: Partial<SBOMComponent>) => Promise<void>;
   addComponents: (items: Partial<SBOMComponent>[]) => Promise<void>;
+  addVulnerabilities: (items: Vulnerability[]) => void;
   updateTicketStatus: (id: string, status: RemediationTicket['status']) => void;
   updateVulnerabilityStatus: (
     idOrCve: string,
@@ -334,9 +335,9 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (openJob) {
             setActiveScan((prev) => prev ?? openJob);
           }
-          const completed = [...scans].reverse().filter(s => s.status === 'COMPLETED' && s.id);
+          const completed = [...scans].reverse().filter(s => (s.status || '').toUpperCase() === 'COMPLETED' && s.id);
           for (const done of completed) {
-            await loadScanResults(done.id, done.project_id || '', done.application_name || '');
+            await loadScanResults(done.id, done.project_id || done.application_name || '', done.application_name || '');
           }
           if (completed.length) setLatestScanId(completed[completed.length - 1].id);
         }
@@ -452,6 +453,12 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!params.localFile && !(params.localFolder && params.localFolder.length > 0)) {
         throw new Error('Choose a folder, a zip archive, or a manifest file to scan.');
       }
+      if (params.localFile && params.localFile.size === 0) {
+        throw new Error(`The file "${params.localFile.name}" is empty (0 bytes). Empty files cannot be scanned.`);
+      }
+      if (params.localFolder && params.localFolder.length > 0 && params.localFolder.every((f) => f.file.size === 0)) {
+        throw new Error('The selected folder contains only empty files (0 bytes). Empty folders cannot be scanned.');
+      }
       const created = await api.createLocalScan(
         { file: params.localFile, folderFiles: params.localFolder },
         params.projectName,
@@ -483,6 +490,9 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdStage = created.stage || createdStage;
     } else {
       if (!params.bulkFile) throw new Error('Choose a CSV or XLSX file, or enter GitHub URLs in the manual list.');
+      if (params.bulkFile.size === 0) {
+        throw new Error(`The spreadsheet file "${params.bulkFile.name}" is empty (0 bytes). Empty files cannot be scanned.`);
+      }
       const created = await api.createBulkScan(params.bulkFile, params.projectName);
       const listed = await api.listScans().catch(() => []);
       const aggregate = api.mapBulkAggregate(created);
@@ -857,6 +867,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
+  const addVulnerabilities = (items: Vulnerability[]) => {
+    if (!items || items.length === 0) return;
+    setVulnerabilities(prev => mergeVulns(prev, items));
+  };
+
   const updateTicketStatus = (id: string, status: RemediationTicket['status']) => {
     setTickets(prev =>
       prev.map(t => (t.id === id ? { ...t, status } : t))
@@ -1191,6 +1206,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addProject,
         addComponent,
         addComponents,
+        addVulnerabilities,
         updateTicketStatus,
         updateVulnerabilityStatus,
         togglePolicy,

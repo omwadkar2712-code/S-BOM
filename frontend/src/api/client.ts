@@ -281,6 +281,10 @@ export interface ApiProjectRow {
   compliance: string;
   compliance_pct: number;
   vulns: number;
+  vuln_critical?: number;
+  vuln_high?: number;
+  vuln_medium?: number;
+  vuln_low?: number;
   scans: number;
   tags: string[];
   last_scanned_at: string;
